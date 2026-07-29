@@ -2,7 +2,7 @@
   "expo": {
     "name": "GroSharey",
     "slug": "grosharey",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "orientation": "portrait",
     "scheme": "grosharey",
     "userInterfaceStyle": "automatic",
@@ -10,7 +10,7 @@
     "plugins": ["expo-router"],
     "android": {
       "package": "com.kingcarni.grosharey",
-      "versionCode": 1,
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#F4F7F2"
       }
@@ -23,10 +23,7 @@
       "bundler": "metro"
     },
     "extra": {
-      "appEnv": "development",
-      "eas": {
-        "projectId": "REPLACE_AFTER_EAS_INIT"
-      }
+      "appEnv": "development"
     }
   }
 }
