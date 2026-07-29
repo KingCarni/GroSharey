@@ -1,36 +1,37 @@
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, useRootNavigationState, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { ActivityIndicator, View } from 'react-native';
 import { AuthProvider, useAuth } from '../src/lib/auth';
 
-function AppNavigator() {
+function AuthGate() {
   const { session, loading } = useAuth();
+  const navigationState = useRootNavigationState();
   const segments = useSegments();
   const router = useRouter();
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || !navigationState?.key) return;
+
     const inAuthGroup = segments[0] === '(auth)';
-    if (!session && !inAuthGroup) router.replace('/(auth)/sign-in');
-    if (session && inAuthGroup) router.replace('/');
-  }, [loading, router, segments, session]);
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
+    if (!session && !inAuthGroup) {
+      router.replace('/(auth)/sign-in');
+      return;
+    }
 
-  return <Stack screenOptions={{ headerTitleAlign: 'center' }} />;
+    if (session && inAuthGroup) {
+      router.replace('/');
+    }
+  }, [loading, navigationState?.key, router, segments, session]);
+
+  return null;
 }
 
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <AppNavigator />
+      <Stack screenOptions={{ headerTitleAlign: 'center' }} />
+      <AuthGate />
       <StatusBar style="auto" />
     </AuthProvider>
   );
