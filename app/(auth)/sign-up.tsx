@@ -1,8 +1,11 @@
 import { Link } from 'expo-router';
+import * as Linking from 'expo-linking';
 import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { isSupabaseConfigured, supabase } from '../../src/lib/supabase';
+
+const emailRedirectTo = Linking.createURL('/(auth)/callback');
 
 export default function SignUpScreen() {
   const [displayName, setDisplayName] = useState('');
@@ -15,15 +18,20 @@ export default function SignUpScreen() {
       Alert.alert('Supabase not configured', 'Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to .env.');
       return;
     }
+
     setBusy(true);
     const { error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
-      options: { data: { display_name: displayName.trim() } },
+      options: {
+        emailRedirectTo,
+        data: { display_name: displayName.trim() },
+      },
     });
     setBusy(false);
+
     if (error) Alert.alert('Sign-up failed', error.message);
-    else Alert.alert('Check your email', 'Confirm your email address to finish creating your account.');
+    else Alert.alert('Check your email', 'Open the confirmation link on this device to finish creating your account.');
   }
 
   return (
