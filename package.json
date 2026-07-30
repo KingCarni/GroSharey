@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "validate": "npm run lint && npm run typecheck",
     "build:apk:preview": "eas build --platform android --profile preview",
+    "build:apk:preview:clean": "eas build --platform android --profile preview --clear-cache",
     "build:apk:development": "eas build --platform android --profile development"
   },
   "dependencies": {
@@ -20,13 +21,14 @@
     "@supabase/supabase-js": "^2.57.4",
     "expo": "~54.0.0",
     "expo-constants": "~18.0.0",
+    "expo-font": "~14.0.12",
     "expo-linking": "~8.0.0",
     "expo-router": "~6.0.0",
     "expo-splash-screen": "~31.0.0",
     "expo-status-bar": "~3.0.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "react-native": "0.81.4",
+    "react-native": "0.81.5",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
     "react-native-url-polyfill": "^2.0.0",
