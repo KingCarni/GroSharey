@@ -1,11 +1,23 @@
 import * as Linking from 'expo-linking';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../src/lib/supabase';
 
-function getAuthValues(url: string) {
+type AuthValues = {
+  code: string | null;
+  accessToken: string | null;
+  refreshToken: string | null;
+  errorDescription: string | null;
+};
+
+function firstString(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function getAuthValues(url: string): AuthValues {
   const normalized = url.replace('#', '?');
   const parsed = new URL(normalized);
 
@@ -19,19 +31,28 @@ function getAuthValues(url: string) {
 
 export default function AuthCallbackScreen() {
   const router = useRouter();
-  const url = Linking.useURL();
+  const liveUrl = Linking.useURL();
+  const params = useLocalSearchParams<{
+    code?: string | string[];
+    access_token?: string | string[];
+    refresh_token?: string | string[];
+    error_description?: string | string[];
+  }>();
   const [message, setMessage] = useState('Confirming your email…');
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (!url) return;
-
-    const callbackUrl = url;
     let active = true;
 
     async function finishConfirmation() {
       try {
-        const { code, accessToken, refreshToken, errorDescription } = getAuthValues(callbackUrl);
+        const initialUrl = liveUrl ?? await Linking.getInitialURL();
+        const urlValues = initialUrl ? getAuthValues(initialUrl) : null;
+
+        const code = firstString(params.code) ?? urlValues?.code ?? null;
+        const accessToken = firstString(params.access_token) ?? urlValues?.accessToken ?? null;
+        const refreshToken = firstString(params.refresh_token) ?? urlValues?.refreshToken ?? null;
+        const errorDescription = firstString(params.error_description) ?? urlValues?.errorDescription ?? null;
 
         if (errorDescription) throw new Error(decodeURIComponent(errorDescription));
 
@@ -45,12 +66,14 @@ export default function AuthCallbackScreen() {
           });
           if (error) throw error;
         } else {
-          throw new Error('The confirmation link did not include a valid authentication code.');
+          throw new Error('The confirmation link did not include a valid authentication code. Request a new confirmation email and use the newest link.');
         }
 
         if (!active) return;
         setMessage('Email confirmed! Opening GroSharey…');
-        setTimeout(() => router.replace('/'), 500);
+        setTimeout(() => {
+          if (active) router.replace('/');
+        }, 500);
       } catch (error) {
         if (!active) return;
         setFailed(true);
@@ -58,21 +81,29 @@ export default function AuthCallbackScreen() {
       }
     }
 
-    void finishConfirmation();
+    const timeout = setTimeout(() => {
+      if (!active) return;
+      setFailed(true);
+      setMessage('Confirmation timed out. Return to sign up, resend the confirmation email, and use the newest link.');
+    }, 15000);
+
+    void finishConfirmation().finally(() => clearTimeout(timeout));
+
     return () => {
       active = false;
+      clearTimeout(timeout);
     };
-  }, [router, url]);
+  }, [liveUrl, params.access_token, params.code, params.error_description, params.refresh_token, router]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        {!failed && <ActivityIndicator size="large" />}
+        {!failed && <ActivityIndicator size="large" color="#173F35" />}
         <Text style={styles.title}>{failed ? 'Confirmation failed' : 'Confirming email'}</Text>
         <Text style={styles.message}>{message}</Text>
         {failed && (
-          <Pressable style={styles.button} onPress={() => router.replace('/(auth)/sign-in')}>
-            <Text style={styles.buttonText}>Return to sign in</Text>
+          <Pressable style={styles.button} onPress={() => router.replace('/(auth)/sign-up')}>
+            <Text style={styles.buttonText}>Return to sign up</Text>
           </Pressable>
         )}
       </View>
@@ -83,8 +114,8 @@ export default function AuthCallbackScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#F4F7F2' },
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16 },
-  title: { fontSize: 28, fontWeight: '800', textAlign: 'center' },
-  message: { fontSize: 16, lineHeight: 24, textAlign: 'center' },
+  title: { color: '#102C25', fontSize: 28, fontWeight: '800', textAlign: 'center' },
+  message: { color: '#344B44', fontSize: 16, lineHeight: 24, textAlign: 'center' },
   button: { backgroundColor: '#173F35', borderRadius: 14, paddingHorizontal: 20, paddingVertical: 14 },
   buttonText: { color: '#FFFFFF', fontWeight: '700' },
 });
