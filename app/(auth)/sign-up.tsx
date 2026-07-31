@@ -12,16 +12,24 @@ export default function SignUpScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmationPending, setConfirmationPending] = useState(false);
 
   async function signUp() {
+    const normalizedEmail = email.trim().toLowerCase();
+
     if (!isSupabaseConfigured) {
-      Alert.alert('Supabase not configured', 'Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to .env.');
+      Alert.alert('Supabase not configured', 'Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to the EAS preview environment.');
+      return;
+    }
+
+    if (!displayName.trim() || !normalizedEmail || !password) {
+      Alert.alert('Missing information', 'Enter your name, email, and password.');
       return;
     }
 
     setBusy(true);
-    const { error } = await supabase.auth.signUp({
-      email: email.trim(),
+    const { data, error } = await supabase.auth.signUp({
+      email: normalizedEmail,
       password,
       options: {
         emailRedirectTo,
@@ -30,20 +38,90 @@ export default function SignUpScreen() {
     });
     setBusy(false);
 
-    if (error) Alert.alert('Sign-up failed', error.message);
-    else Alert.alert('Check your email', 'Open the confirmation link on this device to finish creating your account.');
+    if (error) {
+      Alert.alert('Sign-up failed', error.message);
+      return;
+    }
+
+    if (data.session) {
+      Alert.alert('Account created', 'Your account is ready.');
+      return;
+    }
+
+    setConfirmationPending(true);
+    Alert.alert(
+      'Check your email',
+      'Open the newest GroSharey confirmation email on this device. Check spam or junk if it does not arrive shortly.',
+    );
+  }
+
+  async function resendConfirmation() {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      Alert.alert('Email required', 'Enter the email address that needs confirmation.');
+      return;
+    }
+
+    setBusy(true);
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: normalizedEmail,
+      options: { emailRedirectTo },
+    });
+    setBusy(false);
+
+    if (error) {
+      Alert.alert('Could not resend email', error.message);
+      return;
+    }
+
+    setConfirmationPending(true);
+    Alert.alert('Email sent', 'Use the newest confirmation email. Older confirmation links may no longer be valid.');
   }
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <Text style={styles.title}>Create your account</Text>
-        <TextInput style={styles.input} placeholder="Display name" value={displayName} onChangeText={setDisplayName} />
-        <TextInput style={styles.input} placeholder="Email" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
-        <TextInput style={styles.input} placeholder="Password" secureTextEntry value={password} onChangeText={setPassword} />
+        <TextInput
+          style={styles.input}
+          placeholder="Display name"
+          placeholderTextColor="#6B746F"
+          selectionColor="#173F35"
+          textContentType="name"
+          value={displayName}
+          onChangeText={setDisplayName}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Email"
+          placeholderTextColor="#6B746F"
+          selectionColor="#173F35"
+          autoCapitalize="none"
+          keyboardType="email-address"
+          textContentType="emailAddress"
+          value={email}
+          onChangeText={setEmail}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          placeholderTextColor="#6B746F"
+          selectionColor="#173F35"
+          secureTextEntry
+          textContentType="newPassword"
+          value={password}
+          onChangeText={setPassword}
+        />
         <Pressable style={styles.button} onPress={signUp} disabled={busy}>
-          <Text style={styles.buttonText}>{busy ? 'Creating…' : 'Create account'}</Text>
+          <Text style={styles.buttonText}>{busy ? 'Please wait…' : 'Create account'}</Text>
         </Pressable>
+        {confirmationPending && (
+          <Pressable style={styles.secondaryButton} onPress={resendConfirmation} disabled={busy}>
+            <Text style={styles.secondaryButtonText}>Resend confirmation email</Text>
+          </Pressable>
+        )}
         <Link href="/(auth)/sign-in" style={styles.link}>Back to sign in</Link>
       </View>
     </SafeAreaView>
@@ -53,9 +131,26 @@ export default function SignUpScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#F4F7F2' },
   container: { flex: 1, justifyContent: 'center', padding: 24, gap: 14 },
-  title: { fontSize: 34, fontWeight: '800', marginBottom: 8 },
-  input: { backgroundColor: '#FFFFFF', borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16 },
+  title: { color: '#102C25', fontSize: 34, fontWeight: '800', marginBottom: 8 },
+  input: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#CBD5D0',
+    borderRadius: 14,
+    borderWidth: 1,
+    color: '#102C25',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+  },
   button: { backgroundColor: '#173F35', borderRadius: 14, padding: 16, alignItems: 'center' },
   buttonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
-  link: { textAlign: 'center', fontWeight: '700', marginTop: 6 },
+  secondaryButton: {
+    borderColor: '#173F35',
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    alignItems: 'center',
+  },
+  secondaryButtonText: { color: '#173F35', fontWeight: '700' },
+  link: { color: '#173F35', textAlign: 'center', fontWeight: '700', marginTop: 6 },
 });
