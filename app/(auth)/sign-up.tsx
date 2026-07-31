@@ -5,20 +5,24 @@ import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { isSupabaseConfigured, supabase } from '../../src/lib/supabase';
 
-const emailRedirectTo = Linking.createURL('/(auth)/callback');
+// Expo Router route groups such as `(auth)` are not part of the public URL.
+// app/(auth)/callback.tsx is therefore reached at grosharey://callback.
+const emailRedirectTo = Linking.createURL('/callback');
 
 export default function SignUpScreen() {
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  const [confirmationPending, setConfirmationPending] = useState(false);
 
   async function signUp() {
     const normalizedEmail = email.trim().toLowerCase();
 
     if (!isSupabaseConfigured) {
-      Alert.alert('Supabase not configured', 'Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to the EAS preview environment.');
+      Alert.alert(
+        'Supabase not configured',
+        'Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to the EAS preview environment.',
+      );
       return;
     }
 
@@ -48,15 +52,22 @@ export default function SignUpScreen() {
       return;
     }
 
-    setConfirmationPending(true);
     Alert.alert(
       'Check your email',
-      'Open the newest GroSharey confirmation email on this device. Check spam or junk if it does not arrive shortly.',
+      'Open the newest GroSharey confirmation email on this device. If this address was used before, tap Resend confirmation email below.',
     );
   }
 
   async function resendConfirmation() {
     const normalizedEmail = email.trim().toLowerCase();
+
+    if (!isSupabaseConfigured) {
+      Alert.alert(
+        'Supabase not configured',
+        'Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to the EAS preview environment.',
+      );
+      return;
+    }
 
     if (!normalizedEmail) {
       Alert.alert('Email required', 'Enter the email address that needs confirmation.');
@@ -76,8 +87,10 @@ export default function SignUpScreen() {
       return;
     }
 
-    setConfirmationPending(true);
-    Alert.alert('Email sent', 'Use the newest confirmation email. Older confirmation links may no longer be valid.');
+    Alert.alert(
+      'Confirmation requested',
+      'Check your inbox and spam folder for the newest message. Supabase may suppress another message briefly if the address was requested too recently.',
+    );
   }
 
   return (
@@ -117,11 +130,9 @@ export default function SignUpScreen() {
         <Pressable style={styles.button} onPress={signUp} disabled={busy}>
           <Text style={styles.buttonText}>{busy ? 'Please wait…' : 'Create account'}</Text>
         </Pressable>
-        {confirmationPending && (
-          <Pressable style={styles.secondaryButton} onPress={resendConfirmation} disabled={busy}>
-            <Text style={styles.secondaryButtonText}>Resend confirmation email</Text>
-          </Pressable>
-        )}
+        <Pressable style={styles.secondaryButton} onPress={resendConfirmation} disabled={busy}>
+          <Text style={styles.secondaryButtonText}>Resend confirmation email</Text>
+        </Pressable>
         <Link href="/(auth)/sign-in" style={styles.link}>Back to sign in</Link>
       </View>
     </SafeAreaView>
