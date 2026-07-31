@@ -1,5 +1,5 @@
 import * as Linking from 'expo-linking';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,6 +7,8 @@ import { supabase } from '../../src/lib/supabase';
 
 type AuthValues = {
   code: string | null;
+  tokenHash: string | null;
+  type: string | null;
   accessToken: string | null;
   refreshToken: string | null;
   errorDescription: string | null;
@@ -23,6 +25,8 @@ function getAuthValues(url: string): AuthValues {
 
   return {
     code: parsed.searchParams.get('code'),
+    tokenHash: parsed.searchParams.get('token_hash'),
+    type: parsed.searchParams.get('type'),
     accessToken: parsed.searchParams.get('access_token'),
     refreshToken: parsed.searchParams.get('refresh_token'),
     errorDescription: parsed.searchParams.get('error_description'),
@@ -34,6 +38,8 @@ export default function AuthCallbackScreen() {
   const liveUrl = Linking.useURL();
   const params = useLocalSearchParams<{
     code?: string | string[];
+    token_hash?: string | string[];
+    type?: string | string[];
     access_token?: string | string[];
     refresh_token?: string | string[];
     error_description?: string | string[];
@@ -50,13 +56,21 @@ export default function AuthCallbackScreen() {
         const urlValues = initialUrl ? getAuthValues(initialUrl) : null;
 
         const code = firstString(params.code) ?? urlValues?.code ?? null;
+        const tokenHash = firstString(params.token_hash) ?? urlValues?.tokenHash ?? null;
+        const confirmationType = firstString(params.type) ?? urlValues?.type ?? 'email';
         const accessToken = firstString(params.access_token) ?? urlValues?.accessToken ?? null;
         const refreshToken = firstString(params.refresh_token) ?? urlValues?.refreshToken ?? null;
         const errorDescription = firstString(params.error_description) ?? urlValues?.errorDescription ?? null;
 
         if (errorDescription) throw new Error(decodeURIComponent(errorDescription));
 
-        if (code) {
+        if (tokenHash) {
+          const { error } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: confirmationType === 'signup' ? 'email' : confirmationType as 'email',
+          });
+          if (error) throw error;
+        } else if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
         } else if (accessToken && refreshToken) {
@@ -66,7 +80,7 @@ export default function AuthCallbackScreen() {
           });
           if (error) throw error;
         } else {
-          throw new Error('The confirmation link did not include a valid authentication code. Request a new confirmation email and use the newest link.');
+          throw new Error('The confirmation link did not include a supported authentication token. Request a new confirmation email and use the newest link.');
         }
 
         if (!active) return;
@@ -93,10 +107,20 @@ export default function AuthCallbackScreen() {
       active = false;
       clearTimeout(timeout);
     };
-  }, [liveUrl, params.access_token, params.code, params.error_description, params.refresh_token, router]);
+  }, [
+    liveUrl,
+    params.access_token,
+    params.code,
+    params.error_description,
+    params.refresh_token,
+    params.token_hash,
+    params.type,
+    router,
+  ]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
         {!failed && <ActivityIndicator size="large" color="#173F35" />}
         <Text style={styles.title}>{failed ? 'Confirmation failed' : 'Confirming email'}</Text>
