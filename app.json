@@ -7,7 +7,9 @@
     "scheme": "grosharey",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "plugins": ["expo-router"],
+    "plugins": [
+      "expo-router"
+    ],
     "android": {
       "package": "com.kingcarni.grosharey",
       "versionCode": 2,
@@ -23,7 +25,18 @@
       "bundler": "metro"
     },
     "extra": {
-      "appEnv": "development"
+      "appEnv": "development",
+      "router": {},
+      "eas": {
+        "projectId": "b828b136-e1b1-405b-a73f-fd1b879fce99"
+      }
+    },
+    "owner": "kingcarni",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/b828b136-e1b1-405b-a73f-fd1b879fce99"
     }
   }
 }
