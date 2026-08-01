@@ -5,8 +5,14 @@
     "version": "0.2.0",
     "orientation": "portrait",
     "scheme": "grosharey",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "icon": "./Assets/Favicon.png",
+    "splash": {
+      "image": "./Assets/Logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F4F7F2"
+    },
     "plugins": [
       "expo-router"
     ],
@@ -14,15 +20,18 @@
       "package": "com.kingcarni.grosharey",
       "versionCode": 2,
       "adaptiveIcon": {
+        "foregroundImage": "./Assets/Favicon.png",
         "backgroundColor": "#F4F7F2"
       }
     },
     "ios": {
       "bundleIdentifier": "com.kingcarni.grosharey",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "icon": "./Assets/Favicon.png"
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./Assets/Favicon.png"
     },
     "extra": {
       "appEnv": "development",
