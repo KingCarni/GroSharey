@@ -7,7 +7,8 @@ import { isSupabaseConfigured, supabase } from '../../src/lib/supabase';
 
 // Expo Router route groups such as `(auth)` are not part of the public URL.
 // app/(auth)/callback.tsx is therefore reached at grosharey://callback.
-const emailRedirectTo = Linking.createURL('/callback');
+// Omitting the leading slash prevents Expo from generating grosharey:///callback.
+const emailRedirectTo = Linking.createURL('callback');
 
 export default function SignUpScreen() {
   const [displayName, setDisplayName] = useState('');
