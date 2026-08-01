@@ -1,9 +1,11 @@
+import { Feather } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
+import { AppScreen, PrimaryButton } from '../../src/components/ui';
 import { supabase } from '../../src/lib/supabase';
+import { colors, spacing, type } from '../../src/theme';
 
 type AuthValues = {
   code: string | null;
@@ -44,8 +46,9 @@ export default function AuthCallbackScreen() {
     refresh_token?: string | string[];
     error_description?: string | string[];
   }>();
-  const [message, setMessage] = useState('Confirming your email…');
+  const [message, setMessage] = useState('Verifying your email…');
   const [failed, setFailed] = useState(false);
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -90,7 +93,8 @@ export default function AuthCallbackScreen() {
         }
 
         if (!active) return;
-        setMessage('Email confirmed! Opening GroSharey…');
+        setDone(true);
+        setMessage('Email confirmed. Opening GroSharey…');
         setTimeout(() => {
           if (active) router.replace('/');
         }, 500);
@@ -125,27 +129,82 @@ export default function AuthCallbackScreen() {
   ]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <AppScreen padded={false}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
-        {!failed && <ActivityIndicator size="large" color="#173F35" />}
-        <Text style={styles.title}>{failed ? 'Confirmation failed' : 'Confirming email'}</Text>
+        <Image
+          source={require('../../Assets/Logo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        <View
+          style={[
+            styles.medallion,
+            failed && styles.medallionError,
+            done && styles.medallionDone,
+          ]}
+        >
+          {failed ? (
+            <Feather name="alert-triangle" size={24} color={colors.danger} />
+          ) : done ? (
+            <Feather name="check" size={26} color={colors.primary} />
+          ) : (
+            <ActivityIndicator color={colors.primary} />
+          )}
+        </View>
+        <Text style={styles.title}>
+          {failed ? 'Confirmation failed' : done ? 'You\u2019re in' : 'Confirming email'}
+        </Text>
         <Text style={styles.message}>{message}</Text>
         {failed && (
-          <Pressable style={styles.button} onPress={() => router.replace('/(auth)/sign-up')}>
-            <Text style={styles.buttonText}>Return to sign up</Text>
-          </Pressable>
+          <PrimaryButton
+            label="Return to sign up"
+            onPress={() => router.replace('/(auth)/sign-up')}
+            style={{ marginTop: spacing.xl }}
+            fullWidth={false}
+          />
         )}
       </View>
-    </SafeAreaView>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F4F7F2' },
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16 },
-  title: { color: '#102C25', fontSize: 28, fontWeight: '800', textAlign: 'center' },
-  message: { color: '#344B44', fontSize: 16, lineHeight: 24, textAlign: 'center' },
-  button: { backgroundColor: '#173F35', borderRadius: 14, paddingHorizontal: 20, paddingVertical: 14 },
-  buttonText: { color: '#FFFFFF', fontWeight: '700' },
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xxl,
+  },
+  logo: { width: 54, height: 54, marginBottom: spacing.xl },
+  medallion: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.primaryTint,
+    borderWidth: 1,
+    borderColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
+  },
+  medallionError: {
+    backgroundColor: colors.dangerSoft,
+    borderColor: 'transparent',
+  },
+  medallionDone: {
+    backgroundColor: colors.successSoft,
+    borderColor: 'transparent',
+  },
+  title: {
+    ...type.h1,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
+  message: {
+    ...type.body,
+    color: colors.muted,
+    textAlign: 'center',
+    maxWidth: 320,
+  },
 });

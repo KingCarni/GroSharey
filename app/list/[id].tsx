@@ -1,8 +1,25 @@
+import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  Alert,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import {
+  AppHeader,
+  AppScreen,
+  EmptyState,
+  GroceryItemRow,
+  LoadingState,
+  PrimaryButton,
+  TextField,
+} from '../../src/components/ui';
 import { supabase } from '../../src/lib/supabase';
+import { colors, radii, spacing, type } from '../../src/theme';
 import type { GroceryItem, ShoppingSession } from '../../src/types/database';
 
 export default function GroceryListScreen() {
@@ -11,16 +28,27 @@ export default function GroceryListScreen() {
   const [items, setItems] = useState<GroceryItem[]>([]);
   const [name, setName] = useState('');
   const [session, setSession] = useState<ShoppingSession | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [sessionBusy, setSessionBusy] = useState(false);
 
   useEffect(() => {
     if (!id) return;
-    void loadItems();
-    void loadSession();
+    let cancelled = false;
+    async function initial() {
+      await Promise.all([loadItems(), loadSession()]);
+      if (!cancelled) setInitialLoading(false);
+    }
+    void initial();
     const channel = supabase.channel(`items:${id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'grocery_items', filter: `list_id=eq.${id}` }, loadItems)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_sessions', filter: `list_id=eq.${id}` }, loadSession)
       .subscribe();
-    return () => { void supabase.removeChannel(channel); };
+    return () => {
+      cancelled = true;
+      void supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   async function loadItems() {
@@ -36,141 +64,243 @@ export default function GroceryListScreen() {
   }
 
   async function loadSession() {
-    const { data } = await supabase.from('shopping_sessions').select('*').eq('list_id', id).eq('status', 'active').maybeSingle();
+    const { data } = await supabase
+      .from('shopping_sessions')
+      .select('*')
+      .eq('list_id', id)
+      .eq('status', 'active')
+      .maybeSingle();
     setSession(data ?? null);
   }
 
   async function addItem() {
     if (!name.trim()) return;
-    const { error } = await supabase.from('grocery_items').insert({ list_id: id, name: name.trim(), position: items.length });
+    setAdding(true);
+    const { error } = await supabase
+      .from('grocery_items')
+      .insert({ list_id: id, name: name.trim(), position: items.length });
+    setAdding(false);
     if (error) return Alert.alert('Could not add item', error.message);
     setName('');
   }
 
   async function toggleItem(item: GroceryItem) {
-    const { error } = await supabase.from('grocery_items').update({ is_completed: !item.is_completed }).eq('id', item.id);
+    const { error } = await supabase
+      .from('grocery_items')
+      .update({ is_completed: !item.is_completed })
+      .eq('id', item.id);
     if (error) Alert.alert('Could not update item', error.message);
   }
 
   async function startShopping() {
-    const { error } = await supabase.rpc('start_shopping_session', { shopping_list_id: id, store: null });
+    setSessionBusy(true);
+    const { error } = await supabase.rpc('start_shopping_session', {
+      shopping_list_id: id,
+      store: null,
+    });
+    setSessionBusy(false);
     if (error) return Alert.alert('Could not start shopping', error.message);
     await loadSession();
   }
 
   async function finishShopping() {
     if (!session) return;
-    const { error } = await supabase.rpc('finish_shopping_session', { session_id: session.id });
+    setSessionBusy(true);
+    const { error } = await supabase.rpc('finish_shopping_session', {
+      session_id: session.id,
+    });
+    setSessionBusy(false);
     if (error) return Alert.alert('Could not finish shopping', error.message);
     await loadSession();
   }
 
+  // Active items on top, completed pushed to the bottom while preserving stored order.
   const sortedItems = useMemo(
     () => [...items].sort((a, b) => Number(a.is_completed) - Number(b.is_completed)),
     [items],
   );
 
   const completedCount = items.filter((item) => item.is_completed).length;
+  const progress = items.length ? completedCount / items.length : 0;
+
+  if (initialLoading) {
+    return (
+      <AppScreen>
+        <LoadingState label="Loading list" />
+      </AppScreen>
+    );
+  }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <Text style={styles.backLink}>‹ Back</Text>
-        </Pressable>
-
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.eyebrow}>SHARED LIST</Text>
-            <Text style={styles.title}>Groceries</Text>
-            <Text style={styles.summary}>{completedCount} of {items.length} completed</Text>
+    <AppScreen keyboard padded={false}>
+      <View style={styles.body}>
+        <View style={styles.headerBlock}>
+          <AppHeader
+            title="Groceries"
+            eyebrow="SHARED LIST"
+            onBack={() => router.back()}
+            compact
+          />
+          <View style={styles.progressRow}>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+            </View>
+            <Text style={styles.progressLabel}>
+              {completedCount}/{items.length}
+            </Text>
           </View>
         </View>
 
-        <Pressable style={[styles.shopButton, session && styles.finishButton]} onPress={session ? finishShopping : startShopping}>
-          <Text style={styles.shopButtonText}>{session ? 'Finish shopping' : "I'm going shopping"}</Text>
+        <Pressable
+          onPress={session ? finishShopping : startShopping}
+          disabled={sessionBusy}
+          style={({ pressed }) => [
+            styles.shopButton,
+            session ? styles.shopButtonActive : styles.shopButtonIdle,
+            pressed && styles.shopButtonPressed,
+            sessionBusy && { opacity: 0.6 },
+          ]}
+          testID={session ? 'finish-shopping-btn' : 'start-shopping-btn'}
+        >
+          <Feather
+            name={session ? 'check-circle' : 'shopping-bag'}
+            size={18}
+            color={colors.onPrimary}
+          />
+          <View style={styles.shopButtonText}>
+            <Text style={styles.shopTitle}>
+              {session ? 'Finish shopping' : "I\u2019m going shopping"}
+            </Text>
+            <Text style={styles.shopSub}>
+              {session
+                ? 'Wrap up this trip and sync totals'
+                : 'Notify your household you\u2019re on the way'}
+            </Text>
+          </View>
+          <Feather
+            name={session ? 'x-circle' : 'arrow-right'}
+            size={18}
+            color={colors.onPrimary}
+          />
         </Pressable>
 
-        {session && (
-          <View style={styles.banner}>
-            <Text style={styles.bannerTitle}>Shopping mode is live</Text>
-            <Text style={styles.bannerText}>Household changes will appear here automatically.</Text>
-          </View>
-        )}
-
-        <View style={styles.row}>
-          <TextInput
-            style={styles.input}
+        <View style={styles.addRow}>
+          <TextField
+            containerStyle={styles.addField}
             placeholder="Add milk, bread, apples…"
-            placeholderTextColor="#7B8983"
+            leftIcon="plus"
             value={name}
             onChangeText={setName}
             onSubmitEditing={addItem}
             returnKeyType="done"
+            testID="add-item-input"
           />
-          <Pressable style={styles.addButton} onPress={addItem}>
-            <Text style={styles.addButtonText}>Add</Text>
-          </Pressable>
+          <PrimaryButton
+            label="Add"
+            onPress={addItem}
+            loading={adding}
+            disabled={!name.trim()}
+            fullWidth={false}
+            style={styles.addButton}
+            testID="add-item-btn"
+          />
         </View>
 
         <FlatList
           data={sortedItems}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={[styles.list, sortedItems.length === 0 && styles.emptyList]}
+          contentContainerStyle={[
+            styles.list,
+            sortedItems.length === 0 && styles.emptyList,
+          ]}
           showsVerticalScrollIndicator={false}
-          ListEmptyComponent={(
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>Your list is empty</Text>
-              <Text style={styles.emptyText}>Add the first item above. Everyone in the household will see it.</Text>
-            </View>
-          )}
+          ListEmptyComponent={
+            <EmptyState
+              icon="clipboard"
+              title="Your list is empty"
+              body="Add the first item above. Everyone in the household will see it in real time."
+            />
+          }
           renderItem={({ item }) => (
-            <Pressable style={[styles.item, item.is_completed && styles.itemCompleted]} onPress={() => toggleItem(item)}>
-              <View style={[styles.checkbox, item.is_completed && styles.checkboxDone]}>
-                {item.is_completed && <Text style={styles.checkmark}>✓</Text>}
-              </View>
-              <View style={styles.itemBody}>
-                <Text style={[styles.itemName, item.is_completed && styles.itemDone]}>{item.name}</Text>
-                {!!item.notes && <Text style={styles.itemNotes}>{item.notes}</Text>}
-              </View>
-            </Pressable>
+            <GroceryItemRow
+              item={item}
+              onToggle={toggleItem}
+              testID={`grocery-item-${item.id}`}
+            />
           )}
         />
       </View>
-    </SafeAreaView>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F4F7F2' },
-  container: { flex: 1, paddingHorizontal: 20, paddingTop: 8 },
-  backLink: { color: '#173F35', fontSize: 17, fontWeight: '800', marginBottom: 18 },
-  header: { marginBottom: 16 },
-  eyebrow: { color: '#6A7A73', fontSize: 10, fontWeight: '900', letterSpacing: 1.5 },
-  title: { color: '#102C25', fontSize: 34, fontWeight: '800', marginTop: 2 },
-  summary: { color: '#66746E', marginTop: 4 },
-  shopButton: { backgroundColor: '#173F35', paddingVertical: 15, borderRadius: 16, alignItems: 'center', marginBottom: 14 },
-  finishButton: { backgroundColor: '#8B3D2E' },
-  shopButtonText: { color: '#FFF', fontWeight: '800', fontSize: 16 },
-  banner: { backgroundColor: '#E2E9E3', padding: 14, borderRadius: 14, marginBottom: 14 },
-  bannerTitle: { color: '#173F35', fontWeight: '800', marginBottom: 2 },
-  bannerText: { color: '#52665E' },
-  row: { flexDirection: 'row', gap: 10 },
-  input: { flex: 1, backgroundColor: '#FFF', borderColor: '#D6DED9', borderWidth: 1, borderRadius: 14, color: '#102C25', paddingHorizontal: 14, paddingVertical: 13 },
-  addButton: { backgroundColor: '#173F35', borderRadius: 14, paddingHorizontal: 18, justifyContent: 'center' },
-  addButtonText: { color: '#FFF', fontWeight: '800' },
-  list: { paddingVertical: 16, paddingBottom: 32 },
+  body: {
+    flex: 1,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+  },
+  headerBlock: { marginBottom: spacing.md },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  progressTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: radii.pill,
+    backgroundColor: colors.hairline,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+  },
+  progressLabel: {
+    ...type.caption,
+    color: colors.muted,
+    fontFamily: 'Manrope_600SemiBold',
+  },
+
+  shopButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: radii.xl,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  shopButtonIdle: { backgroundColor: colors.primary },
+  shopButtonActive: { backgroundColor: colors.accent },
+  shopButtonPressed: { opacity: 0.9 },
+  shopButtonText: { flex: 1 },
+  shopTitle: {
+    ...type.h3,
+    color: colors.onPrimary,
+    fontSize: 16,
+  },
+  shopSub: {
+    ...type.bodySmall,
+    color: 'rgba(247,244,234,0.75)',
+    marginTop: 2,
+  },
+
+  addRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  addField: { flex: 1, marginBottom: 0 },
+  addButton: {
+    minHeight: 52,
+    borderRadius: radii.lg,
+    marginTop: 0,
+  },
+
+  list: { paddingVertical: spacing.md, paddingBottom: spacing.xxxl },
   emptyList: { flexGrow: 1, justifyContent: 'center' },
-  item: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderColor: '#E2E8E4', borderWidth: 1, borderRadius: 16, padding: 15, marginBottom: 9 },
-  itemCompleted: { backgroundColor: '#EDF1EE' },
-  checkbox: { width: 26, height: 26, borderRadius: 8, borderWidth: 2, borderColor: '#173F35', marginRight: 13, alignItems: 'center', justifyContent: 'center' },
-  checkboxDone: { backgroundColor: '#173F35' },
-  checkmark: { color: '#FFF', fontSize: 16, fontWeight: '900', lineHeight: 18 },
-  itemBody: { flex: 1 },
-  itemName: { color: '#102C25', fontSize: 17, fontWeight: '700' },
-  itemDone: { textDecorationLine: 'line-through', color: '#718078' },
-  itemNotes: { color: '#6B7973', marginTop: 3 },
-  emptyCard: { backgroundColor: '#E9EFEA', borderRadius: 18, padding: 24, alignItems: 'center' },
-  emptyTitle: { color: '#173F35', fontSize: 18, fontWeight: '800', marginBottom: 5 },
-  emptyText: { color: '#627069', textAlign: 'center', lineHeight: 20 },
 });

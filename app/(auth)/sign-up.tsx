@@ -1,9 +1,15 @@
-import { Link } from 'expo-router';
 import * as Linking from 'expo-linking';
+import { Link } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert, Image, StyleSheet, Text, View } from 'react-native';
+import {
+  AppScreen,
+  PrimaryButton,
+  SecondaryButton,
+  TextField,
+} from '../../src/components/ui';
 import { isSupabaseConfigured, supabase } from '../../src/lib/supabase';
+import { colors, spacing, type } from '../../src/theme';
 
 // Expo Router route groups such as `(auth)` are not part of the public URL.
 // app/(auth)/callback.tsx is therefore reached at grosharey://callback.
@@ -14,7 +20,7 @@ export default function SignUpScreen() {
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'idle' | 'signup' | 'resend'>('idle');
 
   async function signUp() {
     const normalizedEmail = email.trim().toLowerCase();
@@ -32,7 +38,7 @@ export default function SignUpScreen() {
       return;
     }
 
-    setBusy(true);
+    setBusy('signup');
     const { data, error } = await supabase.auth.signUp({
       email: normalizedEmail,
       password,
@@ -41,7 +47,7 @@ export default function SignUpScreen() {
         data: { display_name: displayName.trim() },
       },
     });
-    setBusy(false);
+    setBusy('idle');
 
     if (error) {
       Alert.alert('Sign-up failed', error.message);
@@ -75,13 +81,13 @@ export default function SignUpScreen() {
       return;
     }
 
-    setBusy(true);
+    setBusy('resend');
     const { error } = await supabase.auth.resend({
       type: 'signup',
       email: normalizedEmail,
       options: { emailRedirectTo },
     });
-    setBusy(false);
+    setBusy('idle');
 
     if (error) {
       Alert.alert('Could not resend email', error.message);
@@ -95,74 +101,106 @@ export default function SignUpScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
+    <AppScreen keyboard padded={false} scroll contentContainerStyle={styles.scroll}>
+      <View style={styles.brandBlock}>
+        <Image
+          source={require('../../Assets/Logo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        <Text style={styles.eyebrow}>NEW HERE</Text>
         <Text style={styles.title}>Create your account</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Display name"
-          placeholderTextColor="#6B746F"
-          selectionColor="#173F35"
+        <Text style={styles.subtitle}>
+          One account, one household. Invite the people you shop with in the next step.
+        </Text>
+      </View>
+
+      <View style={styles.form}>
+        <TextField
+          label="Display name"
+          placeholder="Sam Rivera"
+          leftIcon="user"
           textContentType="name"
           value={displayName}
           onChangeText={setDisplayName}
+          returnKeyType="next"
         />
-        <TextInput
-          style={styles.input}
-          placeholder="Email"
-          placeholderTextColor="#6B746F"
-          selectionColor="#173F35"
+        <TextField
+          label="Email"
+          placeholder="you@household.com"
+          leftIcon="mail"
           autoCapitalize="none"
+          autoCorrect={false}
           keyboardType="email-address"
           textContentType="emailAddress"
           value={email}
           onChangeText={setEmail}
+          returnKeyType="next"
         />
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          placeholderTextColor="#6B746F"
-          selectionColor="#173F35"
-          secureTextEntry
+        <TextField
+          label="Password"
+          placeholder="At least 8 characters"
+          leftIcon="lock"
+          secure
           textContentType="newPassword"
           value={password}
           onChangeText={setPassword}
+          hint="You&rsquo;ll confirm your email after signing up."
+          returnKeyType="done"
+          onSubmitEditing={signUp}
         />
-        <Pressable style={styles.button} onPress={signUp} disabled={busy}>
-          <Text style={styles.buttonText}>{busy ? 'Please wait…' : 'Create account'}</Text>
-        </Pressable>
-        <Pressable style={styles.secondaryButton} onPress={resendConfirmation} disabled={busy}>
-          <Text style={styles.secondaryButtonText}>Resend confirmation email</Text>
-        </Pressable>
-        <Link href="/(auth)/sign-in" style={styles.link}>Back to sign in</Link>
+
+        <PrimaryButton
+          label={busy === 'signup' ? 'Creating account…' : 'Create account'}
+          loading={busy === 'signup'}
+          disabled={busy !== 'idle'}
+          onPress={signUp}
+          size="lg"
+          style={{ marginTop: spacing.md }}
+          testID="sign-up-submit"
+        />
+        <SecondaryButton
+          label={busy === 'resend' ? 'Resending…' : 'Resend confirmation email'}
+          loading={busy === 'resend'}
+          disabled={busy !== 'idle'}
+          onPress={resendConfirmation}
+          variant="soft"
+          style={{ marginTop: spacing.sm }}
+          testID="sign-up-resend"
+        />
+
+        <View style={styles.footerRow}>
+          <Text style={styles.footerHint}>Already have an account?</Text>
+          <Link href="/(auth)/sign-in" style={styles.footerLink}>Sign in</Link>
+        </View>
       </View>
-    </SafeAreaView>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F4F7F2' },
-  container: { flex: 1, justifyContent: 'center', padding: 24, gap: 14 },
-  title: { color: '#102C25', fontSize: 34, fontWeight: '800', marginBottom: 8 },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#CBD5D0',
-    borderRadius: 14,
-    borderWidth: 1,
-    color: '#102C25',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
+  scroll: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xxl,
+    paddingBottom: spacing.xxl,
   },
-  button: { backgroundColor: '#173F35', borderRadius: 14, padding: 16, alignItems: 'center' },
-  buttonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
-  secondaryButton: {
-    borderColor: '#173F35',
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 14,
+  brandBlock: { alignItems: 'flex-start' },
+  logo: { width: 60, height: 60, marginBottom: spacing.lg },
+  eyebrow: { ...type.eyebrow, color: colors.primary, marginBottom: spacing.sm },
+  title: { ...type.display, fontSize: 30, lineHeight: 36, marginBottom: spacing.sm },
+  subtitle: { ...type.body, color: colors.muted, maxWidth: 360 },
+  form: { marginTop: spacing.xl },
+  footerRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
+    marginTop: spacing.xl,
+    gap: spacing.xs,
   },
-  secondaryButtonText: { color: '#173F35', fontWeight: '700' },
-  link: { color: '#173F35', textAlign: 'center', fontWeight: '700', marginTop: 6 },
+  footerHint: { ...type.body, color: colors.muted },
+  footerLink: {
+    ...type.button,
+    color: colors.primary,
+    textDecorationLine: 'underline',
+  },
 });

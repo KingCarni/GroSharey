@@ -1,9 +1,28 @@
+import { Feather } from '@expo/vector-icons';
 import { Link } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  Alert,
+  FlatList,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import {
+  AppScreen,
+  EmptyState,
+  HouseholdCard,
+  LoadingState,
+  PrimaryButton,
+  SecondaryButton,
+  SectionHeader,
+  TextField,
+} from '../src/components/ui';
 import { useAuth } from '../src/lib/auth';
 import { supabase } from '../src/lib/supabase';
+import { colors, radii, spacing, type } from '../src/theme';
 import type { GroceryList, Household } from '../src/types/database';
 
 export default function HomeScreen() {
@@ -13,16 +32,32 @@ export default function HomeScreen() {
   const [householdName, setHouseholdName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [selectedHousehold, setSelectedHousehold] = useState<string | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [joining, setJoining] = useState(false);
 
   const loadHouseholds = useCallback(async () => {
-    const { data, error } = await supabase.from('households').select('*').is('deleted_at', null).order('created_at');
-    if (error) return Alert.alert('Could not load households', error.message);
+    const { data, error } = await supabase
+      .from('households')
+      .select('*')
+      .is('deleted_at', null)
+      .order('created_at');
+    if (error) {
+      setInitialLoading(false);
+      return Alert.alert('Could not load households', error.message);
+    }
     setHouseholds(data ?? []);
     setSelectedHousehold((current) => current ?? data?.[0]?.id ?? null);
+    setInitialLoading(false);
   }, []);
 
   const loadLists = useCallback(async (householdId: string) => {
-    const { data, error } = await supabase.from('grocery_lists').select('*').eq('household_id', householdId).is('deleted_at', null).order('created_at');
+    const { data, error } = await supabase
+      .from('grocery_lists')
+      .select('*')
+      .eq('household_id', householdId)
+      .is('deleted_at', null)
+      .order('created_at');
     if (error) return Alert.alert('Could not load lists', error.message);
     setLists(data ?? []);
   }, []);
@@ -32,24 +67,43 @@ export default function HomeScreen() {
     void loadHouseholds();
     const channel = supabase
       .channel(`households:${user.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'household_memberships', filter: `user_id=eq.${user.id}` }, loadHouseholds)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'household_memberships', filter: `user_id=eq.${user.id}` },
+        loadHouseholds,
+      )
       .subscribe();
-    return () => { void supabase.removeChannel(channel); };
+    return () => {
+      void supabase.removeChannel(channel);
+    };
   }, [loadHouseholds, user]);
 
   useEffect(() => {
-    if (!selectedHousehold) return;
+    if (!selectedHousehold) {
+      setLists([]);
+      return;
+    }
     void loadLists(selectedHousehold);
     const channel = supabase
       .channel(`lists:${selectedHousehold}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'grocery_lists', filter: `household_id=eq.${selectedHousehold}` }, () => loadLists(selectedHousehold))
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'grocery_lists', filter: `household_id=eq.${selectedHousehold}` },
+        () => loadLists(selectedHousehold),
+      )
       .subscribe();
-    return () => { void supabase.removeChannel(channel); };
+    return () => {
+      void supabase.removeChannel(channel);
+    };
   }, [loadLists, selectedHousehold]);
 
   async function createHousehold() {
     if (!householdName.trim()) return;
-    const { data, error } = await supabase.rpc('create_household', { household_name: householdName.trim() });
+    setCreating(true);
+    const { data, error } = await supabase.rpc('create_household', {
+      household_name: householdName.trim(),
+    });
+    setCreating(false);
     if (error) return Alert.alert('Could not create household', error.message);
     setHouseholdName('');
     await loadHouseholds();
@@ -58,7 +112,11 @@ export default function HomeScreen() {
 
   async function joinHousehold() {
     if (!inviteCode.trim()) return;
-    const { data, error } = await supabase.rpc('accept_household_invite', { invite_code: inviteCode.trim() });
+    setJoining(true);
+    const { data, error } = await supabase.rpc('accept_household_invite', {
+      invite_code: inviteCode.trim(),
+    });
+    setJoining(false);
     if (error) return Alert.alert('Could not join household', error.message);
     setInviteCode('');
     await loadHouseholds();
@@ -66,57 +124,244 @@ export default function HomeScreen() {
     Alert.alert('Household joined', 'You now share lists and shopping updates with this household.');
   }
 
-  const selectedName = useMemo(() => households.find((item) => item.id === selectedHousehold)?.name ?? '', [households, selectedHousehold]);
+  const selectedName = useMemo(
+    () => households.find((item) => item.id === selectedHousehold)?.name ?? '',
+    [households, selectedHousehold],
+  );
+
+  if (initialLoading) {
+    return (
+      <AppScreen>
+        <LoadingState label="Loading your households" />
+      </AppScreen>
+    );
+  }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <View style={styles.brandBlock}>
-            <Image source={require('../Assets/Favicon.png')} style={styles.logo} />
-            <View><Text style={styles.eyebrow}>GROSHAREY</Text><Text style={styles.title}>Your households</Text></View>
+    <AppScreen scroll padded={false} contentContainerStyle={styles.scroll}>
+      <View style={styles.headerRow}>
+        <View style={styles.brand}>
+          <Image
+            source={require('../Assets/Favicon.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <View>
+            <Text style={styles.eyebrow}>GROSHAREY</Text>
+            <Text style={styles.title}>Your households</Text>
           </View>
-          <Pressable onPress={() => supabase.auth.signOut()}><Text style={styles.linkText}>Sign out</Text></Pressable>
         </View>
-
-        <View style={styles.row}>
-          <TextInput style={styles.input} placeholder="Household name" placeholderTextColor="#7B8983" value={householdName} onChangeText={setHouseholdName} onSubmitEditing={createHousehold} />
-          <Pressable style={styles.button} onPress={createHousehold}><Text style={styles.buttonText}>Create</Text></Pressable>
-        </View>
-        <View style={styles.row}>
-          <TextInput style={styles.input} placeholder="Invite code" placeholderTextColor="#7B8983" autoCapitalize="characters" value={inviteCode} onChangeText={setInviteCode} onSubmitEditing={joinHousehold} />
-          <Pressable style={styles.secondaryButton} onPress={joinHousehold}><Text style={styles.secondaryButtonText}>Join</Text></Pressable>
-        </View>
-
-        <FlatList horizontal data={households} keyExtractor={(item) => item.id} contentContainerStyle={styles.householdList} showsHorizontalScrollIndicator={false} renderItem={({ item }) => {
-          const active = selectedHousehold === item.id;
-          return <Pressable onPress={() => setSelectedHousehold(item.id)} style={[styles.householdCard, active && styles.householdCardActive]}>
-            <Text style={[styles.householdLabel, active && styles.activeText]}>HOUSEHOLD</Text>
-            <Text style={[styles.householdName, active && styles.activeText]}>{item.name}</Text>
-            <Text style={[styles.householdMeta, active && styles.activeMeta]}>{active ? `${lists.length} shared ${lists.length === 1 ? 'list' : 'lists'}` : 'Tap to open'}</Text>
-          </Pressable>;
-        }} />
-
-        {selectedHousehold ? <View style={styles.section}>
-          <View style={styles.sectionHeader}><View><Text style={styles.sectionEyebrow}>{selectedName.toUpperCase()}</Text><Text style={styles.sectionTitle}>Shared lists</Text></View>
-            <Link href={{ pathname: '/household/[id]', params: { id: selectedHousehold } }} style={styles.linkText}>Manage</Link></View>
-          <FlatList data={lists} keyExtractor={(item) => item.id} ListEmptyComponent={<View style={styles.emptyCard}><Text style={styles.emptyTitle}>No lists yet</Text><Text style={styles.emptyText}>Create one from household management.</Text></View>} renderItem={({ item }) => (
-            <Link href={{ pathname: '/list/[id]', params: { id: item.id } }} asChild><Pressable style={styles.card}><Text style={styles.cardIcon}>🛒</Text><View style={{ flex: 1 }}><Text style={styles.cardTitle}>{item.name}</Text><Text style={styles.cardText}>Open shared grocery list</Text></View><Text style={styles.chevron}>›</Text></Pressable></Link>
-          )} />
-        </View> : <View style={styles.emptyCard}><Text style={styles.emptyTitle}>Create or join a household</Text><Text style={styles.emptyText}>Use an invite code from another GroSharey user to join theirs.</Text></View>}
+        <Pressable
+          hitSlop={10}
+          onPress={() => supabase.auth.signOut()}
+          style={({ pressed }) => [styles.iconButton, pressed && styles.iconPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Sign out"
+          testID="sign-out-button"
+        >
+          <Feather name="log-out" size={18} color={colors.primary} />
+        </Pressable>
       </View>
-    </SafeAreaView>
+
+      {households.length > 0 && (
+        <FlatList
+          horizontal
+          data={households}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.householdList}
+          showsHorizontalScrollIndicator={false}
+          renderItem={({ item }) => {
+            const active = selectedHousehold === item.id;
+            return (
+              <View style={{ marginRight: spacing.md }}>
+                <HouseholdCard
+                  name={item.name}
+                  meta={active ? `${lists.length} shared ${lists.length === 1 ? 'list' : 'lists'}` : 'Tap to open'}
+                  active={active}
+                  onPress={() => setSelectedHousehold(item.id)}
+                  testID={`household-card-${item.id}`}
+                />
+              </View>
+            );
+          }}
+        />
+      )}
+
+      <View style={styles.actionCard}>
+        <SectionHeader eyebrow="GET STARTED" title="Add a household" />
+        <TextField
+          placeholder="Household name"
+          leftIcon="home"
+          value={householdName}
+          onChangeText={setHouseholdName}
+          returnKeyType="done"
+          onSubmitEditing={createHousehold}
+          testID="new-household-input"
+        />
+        <PrimaryButton
+          label="Create household"
+          icon="plus"
+          onPress={createHousehold}
+          loading={creating}
+          disabled={!householdName.trim()}
+          testID="create-household-btn"
+        />
+
+        <View style={styles.divider}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>OR</Text>
+          <View style={styles.dividerLine} />
+        </View>
+
+        <TextField
+          placeholder="Invite code"
+          leftIcon="key"
+          autoCapitalize="characters"
+          value={inviteCode}
+          onChangeText={setInviteCode}
+          returnKeyType="done"
+          onSubmitEditing={joinHousehold}
+          testID="join-household-input"
+        />
+        <SecondaryButton
+          label="Join with invite code"
+          icon="user-plus"
+          variant="outline"
+          onPress={joinHousehold}
+          loading={joining}
+          disabled={!inviteCode.trim()}
+          testID="join-household-btn"
+        />
+      </View>
+
+      {selectedHousehold ? (
+        <View style={styles.section}>
+          <SectionHeader
+            eyebrow={selectedName.toUpperCase()}
+            title="Shared lists"
+            trailing={
+              <Link
+                href={{ pathname: '/household/[id]', params: { id: selectedHousehold } }}
+                style={styles.manageLink}
+              >
+                Manage
+              </Link>
+            }
+          />
+          {lists.length === 0 ? (
+            <EmptyState
+              icon="shopping-cart"
+              title="No lists yet"
+              body="Create your first shared grocery list from household management."
+            />
+          ) : (
+            lists.map((item) => (
+              <Link
+                key={item.id}
+                href={{ pathname: '/list/[id]', params: { id: item.id } }}
+                asChild
+              >
+                <Pressable
+                  style={({ pressed }) => [styles.listCard, pressed && styles.listCardPressed]}
+                  testID={`list-card-${item.id}`}
+                >
+                  <View style={styles.listIcon}>
+                    <Feather name="shopping-cart" size={18} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.listTitle} numberOfLines={1}>{item.name}</Text>
+                    <Text style={styles.listSub}>Open shared grocery list</Text>
+                  </View>
+                  <Feather name="chevron-right" size={20} color={colors.subtle} />
+                </Pressable>
+              </Link>
+            ))
+          )}
+        </View>
+      ) : (
+        <EmptyState
+          icon="users"
+          title="Create or join a household"
+          body="Use an invite code from another GroSharey user, or start a fresh household above."
+          tone="warm"
+        />
+      )}
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F4F7F2' }, container: { flex: 1, padding: 20 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }, brandBlock: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }, logo: { width: 44, height: 44, borderRadius: 12 },
-  eyebrow: { color: '#173F35', fontSize: 11, fontWeight: '900', letterSpacing: 1.8 }, title: { color: '#102C25', fontSize: 28, fontWeight: '800' }, linkText: { color: '#173F35', fontWeight: '800' },
-  row: { flexDirection: 'row', gap: 10, marginBottom: 10 }, input: { flex: 1, backgroundColor: '#FFF', borderColor: '#D6DED9', borderWidth: 1, borderRadius: 14, color: '#102C25', paddingHorizontal: 14, paddingVertical: 13 },
-  button: { backgroundColor: '#173F35', borderRadius: 14, paddingHorizontal: 18, justifyContent: 'center' }, buttonText: { color: '#FFF', fontWeight: '800' }, secondaryButton: { borderColor: '#173F35', borderWidth: 1, borderRadius: 14, paddingHorizontal: 20, justifyContent: 'center' }, secondaryButtonText: { color: '#173F35', fontWeight: '800' },
-  householdList: { gap: 10, paddingVertical: 10 }, householdCard: { width: 180, minHeight: 112, backgroundColor: '#E4EBE5', borderRadius: 20, padding: 16, justifyContent: 'space-between' }, householdCardActive: { backgroundColor: '#173F35' }, householdLabel: { color: '#597067', fontSize: 10, fontWeight: '900', letterSpacing: 1.4 }, householdName: { color: '#173F35', fontSize: 19, fontWeight: '800' }, householdMeta: { color: '#597067', fontSize: 13 }, activeText: { color: '#FFF' }, activeMeta: { color: '#DDEAE4' },
-  section: { flex: 1, marginTop: 8 }, sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }, sectionEyebrow: { color: '#6B7A74', fontSize: 10, fontWeight: '900', letterSpacing: 1.3 }, sectionTitle: { color: '#102C25', fontSize: 24, fontWeight: '800' },
-  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 18, padding: 16, marginBottom: 10, borderColor: '#E2E8E4', borderWidth: 1 }, cardIcon: { fontSize: 22, marginRight: 12 }, cardTitle: { color: '#102C25', fontSize: 18, fontWeight: '800' }, cardText: { color: '#63716B', marginTop: 3 }, chevron: { color: '#173F35', fontSize: 28 },
-  emptyCard: { backgroundColor: '#E9EFEA', borderRadius: 18, padding: 22, alignItems: 'center' }, emptyTitle: { color: '#173F35', fontSize: 18, fontWeight: '800', marginBottom: 4 }, emptyText: { color: '#627069', textAlign: 'center', lineHeight: 20 },
+  scroll: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.xxl,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xl,
+  },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1 },
+  logo: { width: 40, height: 40, borderRadius: radii.md },
+  eyebrow: { ...type.eyebrow, color: colors.primary, marginBottom: 2 },
+  title: { ...type.h1 },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
+    backgroundColor: colors.primaryTint,
+    borderWidth: 1,
+    borderColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconPressed: { opacity: 0.7 },
+
+  householdList: { paddingVertical: spacing.sm, paddingRight: spacing.xl },
+
+  actionCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.xxl,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    padding: spacing.lg,
+    marginTop: spacing.md,
+    marginBottom: spacing.xl,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginVertical: spacing.md,
+  },
+  dividerLine: { flex: 1, height: 1, backgroundColor: colors.hairline },
+  dividerText: { ...type.caption, color: colors.subtle, letterSpacing: 1.5 },
+
+  section: { marginTop: spacing.sm },
+  manageLink: { ...type.button, color: colors.primary },
+
+  listCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  listCardPressed: { opacity: 0.85 },
+  listIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
+    backgroundColor: colors.primaryTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listTitle: { ...type.h3, color: colors.ink, fontSize: 16 },
+  listSub: { ...type.caption, marginTop: 2 },
 });
