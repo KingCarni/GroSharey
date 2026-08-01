@@ -14,7 +14,14 @@
       "backgroundColor": "#F4F7F2"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "color": "#173F35",
+          "defaultChannel": "grosharey-updates"
+        }
+      ]
     ],
     "android": {
       "package": "com.kingcarni.grosharey",
