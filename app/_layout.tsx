@@ -1,28 +1,48 @@
-import { Stack, useRootNavigationState, useRouter, useSegments } from 'expo-router';
+import * as Notifications from 'expo-notifications';
+import { Stack, router, useRootNavigationState, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from '../src/lib/auth';
+import { registerForPushNotifications } from '../src/lib/notifications';
 
 function AuthGate() {
-  const { session, loading } = useAuth();
+  const { session, loading, user } = useAuth();
   const navigationState = useRootNavigationState();
   const segments = useSegments();
-  const router = useRouter();
+  const localRouter = useRouter();
 
   useEffect(() => {
     if (loading || !navigationState?.key) return;
-
     const inAuthGroup = segments[0] === '(auth)';
+    if (!session && !inAuthGroup) localRouter.replace('/(auth)/sign-in');
+    if (session && inAuthGroup) localRouter.replace('/');
+  }, [loading, navigationState?.key, localRouter, segments, session]);
 
-    if (!session && !inAuthGroup) {
-      router.replace('/(auth)/sign-in');
-      return;
+  useEffect(() => {
+    if (!user) return;
+    void registerForPushNotifications(user.id).catch((error) => {
+      console.warn('Push registration failed', error);
+    });
+  }, [user]);
+
+  return null;
+}
+
+function NotificationObserver() {
+  useEffect(() => {
+    function openNotification(notification: Notifications.Notification) {
+      const url = notification.request.content.data?.url;
+      if (typeof url === 'string') router.push(url as never);
     }
 
-    if (session && inAuthGroup) {
-      router.replace('/');
-    }
-  }, [loading, navigationState?.key, router, segments, session]);
+    const lastResponse = Notifications.getLastNotificationResponse();
+    if (lastResponse?.notification) openNotification(lastResponse.notification);
+
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      openNotification(response.notification);
+    });
+    return () => subscription.remove();
+  }, []);
 
   return null;
 }
@@ -30,13 +50,9 @@ function AuthGate() {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: '#F4F7F2' },
-        }}
-      />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#F4F7F2' } }} />
       <AuthGate />
+      <NotificationObserver />
       <StatusBar style="dark" />
     </AuthProvider>
   );
