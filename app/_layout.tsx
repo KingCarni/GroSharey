@@ -30,9 +30,14 @@ function AuthGate() {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <Stack screenOptions={{ headerTitleAlign: 'center' }} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: '#F4F7F2' },
+        }}
+      />
       <AuthGate />
-      <StatusBar style="auto" />
+      <StatusBar style="dark" />
     </AuthProvider>
   );
 }
