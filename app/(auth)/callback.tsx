@@ -80,7 +80,13 @@ export default function AuthCallbackScreen() {
           });
           if (error) throw error;
         } else {
-          throw new Error('The confirmation link did not include a supported authentication token. Request a new confirmation email and use the newest link.');
+          // Supabase may have completed confirmation before Android hands the app
+          // the redirect. Accept an already-persisted session before reporting failure.
+          const { data, error } = await supabase.auth.getSession();
+          if (error) throw error;
+          if (!data.session) {
+            throw new Error('The confirmation link did not include a supported authentication token. Request a new confirmation email and use the newest link.');
+          }
         }
 
         if (!active) return;
