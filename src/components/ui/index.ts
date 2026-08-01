@@ -7,6 +7,7 @@ export { SectionHeader } from './SectionHeader';
 export { EmptyState } from './EmptyState';
 export { HouseholdCard } from './HouseholdCard';
 export { GroceryItemRow } from './GroceryItemRow';
+export { ItemDetailsModal } from './ItemDetailsModal';
 export { StatCard } from './StatCard';
 export { ReceiptCard } from './ReceiptCard';
 export { MessageBubble } from './MessageBubble';
