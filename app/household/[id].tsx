@@ -71,6 +71,11 @@ export default function HouseholdScreen() {
         ListHeaderComponent={<>
           <Pressable onPress={() => router.back()}><Text style={styles.link}>‹ Back</Text></Pressable>
           <Text style={styles.title}>Manage household</Text>
+          <View style={styles.featureRow}>
+            <Link href={{ pathname: '/household/[id]/chat', params: { id } }} asChild><Pressable style={styles.featureCard}><Text style={styles.featureIcon}>💬</Text><Text style={styles.featureText}>Chat</Text></Pressable></Link>
+            <Link href={{ pathname: '/household/[id]/receipts', params: { id } }} asChild><Pressable style={styles.featureCard}><Text style={styles.featureIcon}>🧾</Text><Text style={styles.featureText}>Receipts</Text></Pressable></Link>
+            <Link href={{ pathname: '/household/[id]/analytics', params: { id } }} asChild><Pressable style={styles.featureCard}><Text style={styles.featureIcon}>📊</Text><Text style={styles.featureText}>Analytics</Text></Pressable></Link>
+          </View>
           <View style={styles.panel}>
             <View style={styles.panelHeader}><Text style={styles.sectionTitle}>Members</Text><Text style={styles.meta}>{members.length} active</Text></View>
             {members.map((member) => <View key={member.id} style={styles.memberRow}><Text style={styles.memberName}>{member.profiles?.display_name || 'GroSharey member'}</Text><Text style={styles.role}>{member.role}</Text></View>)}
@@ -97,6 +102,7 @@ export default function HouseholdScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#F4F7F2' }, container: { padding: 20, paddingBottom: 40 }, link: { color: '#173F35', fontWeight: '800', marginBottom: 12 }, title: { color: '#102C25', fontSize: 30, fontWeight: '800', marginBottom: 16 },
+  featureRow: { flexDirection: 'row', gap: 8, marginBottom: 12 }, featureCard: { flex: 1, backgroundColor: '#E4EBE5', borderRadius: 16, paddingVertical: 14, alignItems: 'center' }, featureIcon: { fontSize: 22, marginBottom: 4 }, featureText: { color: '#173F35', fontWeight: '800' },
   panel: { backgroundColor: '#FFF', borderRadius: 18, padding: 16, marginBottom: 12, borderColor: '#E2E8E4', borderWidth: 1 }, panelHeader: { flexDirection: 'row', justifyContent: 'space-between' }, sectionTitle: { color: '#102C25', fontSize: 18, fontWeight: '800', marginBottom: 8 }, help: { color: '#627069', marginBottom: 12 }, meta: { color: '#718078', fontSize: 12 },
   memberRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderTopColor: '#EDF1EE', borderTopWidth: 1 }, memberName: { color: '#102C25', fontWeight: '700' }, role: { color: '#597067', textTransform: 'capitalize' },
   row: { flexDirection: 'row', gap: 10 }, input: { flex: 1, backgroundColor: '#F4F7F2', color: '#102C25', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12 }, button: { backgroundColor: '#173F35', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, justifyContent: 'center', alignItems: 'center' }, buttonText: { color: '#FFF', fontWeight: '800' },
