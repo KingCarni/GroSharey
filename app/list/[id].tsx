@@ -12,6 +12,7 @@ import {
   PrimaryButton,
   TextField,
 } from '../../src/components/ui';
+import { dispatchQueuedPushNotifications } from '../../src/lib/notifications';
 import { supabase } from '../../src/lib/supabase';
 import { colors, radii, spacing, type } from '../../src/theme';
 import type { GroceryItem, ShoppingSession } from '../../src/types/database';
@@ -71,12 +72,16 @@ export default function GroceryListScreen() {
   }
 
   async function loadSession() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('shopping_sessions')
       .select('*')
       .eq('list_id', id)
       .eq('status', 'active')
       .maybeSingle();
+    if (error) {
+      console.warn('Could not refresh shopping session:', error.message);
+      return;
+    }
     setSession(data ?? null);
   }
 
@@ -89,6 +94,8 @@ export default function GroceryListScreen() {
     setAdding(false);
     if (error) return Alert.alert('Could not add item', error.message);
     setName('');
+    await loadItems();
+    void dispatchQueuedPushNotifications();
   }
 
   async function toggleItem(item: GroceryItem) {
@@ -101,7 +108,9 @@ export default function GroceryListScreen() {
         completed_by: completed ? (await supabase.auth.getUser()).data.user?.id ?? null : null,
       })
       .eq('id', item.id);
-    if (error) Alert.alert('Could not update item', error.message);
+    if (error) return Alert.alert('Could not update item', error.message);
+    await loadItems();
+    void dispatchQueuedPushNotifications();
   }
 
   async function saveItem(draft: ItemDraft) {
@@ -142,6 +151,7 @@ export default function GroceryListScreen() {
     if (error) return Alert.alert('Could not save item', error.message);
     setSelectedItem(null);
     await loadItems();
+    if (completedChanged) void dispatchQueuedPushNotifications();
   }
 
   function confirmDeleteItem() {
@@ -171,10 +181,21 @@ export default function GroceryListScreen() {
 
   async function startShopping() {
     setSessionBusy(true);
-    const { error } = await supabase.rpc('start_shopping_session', { shopping_list_id: id, store: null });
+    const { data, error } = await supabase.rpc('start_shopping_session', { shopping_list_id: id, store: null });
     setSessionBusy(false);
     if (error) return Alert.alert('Could not start shopping', error.message);
-    await loadSession();
+
+    if (typeof data === 'string') {
+      const { data: createdSession } = await supabase
+        .from('shopping_sessions')
+        .select('*')
+        .eq('id', data)
+        .maybeSingle();
+      setSession(createdSession ?? null);
+    } else {
+      await loadSession();
+    }
+    void dispatchQueuedPushNotifications();
   }
 
   async function finishShopping() {
@@ -183,7 +204,11 @@ export default function GroceryListScreen() {
     const { error } = await supabase.rpc('finish_shopping_session', { session_id: session.id });
     setSessionBusy(false);
     if (error) return Alert.alert('Could not finish shopping', error.message);
-    await loadSession();
+
+    // End the trip immediately in the UI; the RPC also removes completed items.
+    setSession(null);
+    await Promise.all([loadItems(), loadSession()]);
+    void dispatchQueuedPushNotifications();
   }
 
   const sortedItems = useMemo(
@@ -223,9 +248,9 @@ export default function GroceryListScreen() {
           <Feather name={session ? 'check-circle' : 'shopping-bag'} size={18} color={colors.onPrimary} />
           <View style={styles.shopButtonText}>
             <Text style={styles.shopTitle}>{session ? 'Finish shopping' : 'I’m going shopping'}</Text>
-            <Text style={styles.shopSub}>{session ? 'Wrap up this trip and sync totals' : 'Notify your household you’re on the way'}</Text>
+            <Text style={styles.shopSub}>{session ? 'Finish this trip and clear picked-up items' : 'Notify your household you’re on the way'}</Text>
           </View>
-          <Feather name={session ? 'x-circle' : 'arrow-right'} size={18} color={colors.onPrimary} />
+          <Feather name={session ? 'check' : 'arrow-right'} size={18} color={colors.onPrimary} />
         </Pressable>
 
         <View style={styles.addRow}>
