@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldPlaySound: false,
+    shouldPlaySound: true,
     shouldSetBadge: false,
     shouldShowBanner: true,
     shouldShowList: true,
@@ -20,6 +20,7 @@ export async function registerForPushNotifications(userId: string): Promise<stri
       name: 'GroSharey updates',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
+      sound: 'default',
     });
   }
 
@@ -46,4 +47,20 @@ export async function registerForPushNotifications(userId: string): Promise<stri
   );
   if (error) throw error;
   return token;
+}
+
+/**
+ * Flushes notification_outbox through the deployed Supabase Edge Function.
+ * This is deliberately best-effort: an app action should still succeed if
+ * push delivery is temporarily unavailable.
+ */
+export async function dispatchQueuedPushNotifications(): Promise<void> {
+  try {
+    const { error } = await supabase.functions.invoke('send-push-notifications', {
+      body: {},
+    });
+    if (error) console.warn('Push dispatch failed:', error.message);
+  } catch (error) {
+    console.warn('Push dispatch failed:', error);
+  }
 }
