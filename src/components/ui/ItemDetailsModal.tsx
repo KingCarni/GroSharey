@@ -157,7 +157,7 @@ function Field({ label, style, multiline, ...props }: FieldProps) {
 const styles = StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10,28,23,0.45)' },
-  sheet: { maxHeight: '92%', backgroundColor: colors.background, borderTopLeftRadius: radii.xl, borderTopRightRadius: radii.xl, overflow: 'hidden' },
+  sheet: { maxHeight: '92%', backgroundColor: colors.bg, borderTopLeftRadius: radii.xl, borderTopRightRadius: radii.xl, overflow: 'hidden' },
   handleArea: { alignItems: 'center', paddingVertical: spacing.sm },
   handle: { width: 44, height: 5, borderRadius: radii.pill, backgroundColor: colors.hairlineWarm },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.xl, paddingBottom: spacing.md },
