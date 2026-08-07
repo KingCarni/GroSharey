@@ -187,53 +187,6 @@ export default function HomeScreen() {
         />
       )}
 
-      <View style={styles.actionCard}>
-        <SectionHeader eyebrow="GET STARTED" title="Add a household" />
-        <TextField
-          placeholder="Household name"
-          leftIcon="home"
-          value={householdName}
-          onChangeText={setHouseholdName}
-          returnKeyType="done"
-          onSubmitEditing={createHousehold}
-          testID="new-household-input"
-        />
-        <PrimaryButton
-          label="Create household"
-          icon="plus"
-          onPress={createHousehold}
-          loading={creating}
-          disabled={!householdName.trim()}
-          testID="create-household-btn"
-        />
-
-        <View style={styles.divider}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>OR</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        <TextField
-          placeholder="Invite code"
-          leftIcon="key"
-          autoCapitalize="characters"
-          value={inviteCode}
-          onChangeText={setInviteCode}
-          returnKeyType="done"
-          onSubmitEditing={joinHousehold}
-          testID="join-household-input"
-        />
-        <SecondaryButton
-          label="Join with invite code"
-          icon="user-plus"
-          variant="outline"
-          onPress={joinHousehold}
-          loading={joining}
-          disabled={!inviteCode.trim()}
-          testID="join-household-btn"
-        />
-      </View>
-
       {selectedHousehold ? (
         <View style={styles.section}>
           <SectionHeader
@@ -282,10 +235,57 @@ export default function HomeScreen() {
         <EmptyState
           icon="users"
           title="Create or join a household"
-          body="Use an invite code from another GroSharey user, or start a fresh household above."
+          body="Use an invite code from another GroSharey user, or start a fresh household below."
           tone="warm"
         />
       )}
+
+      <View style={styles.actionCard}>
+        <SectionHeader eyebrow="HOUSEHOLD" title="Add or join a household" />
+        <TextField
+          placeholder="Household name"
+          leftIcon="home"
+          value={householdName}
+          onChangeText={setHouseholdName}
+          returnKeyType="done"
+          onSubmitEditing={createHousehold}
+          testID="new-household-input"
+        />
+        <PrimaryButton
+          label="Create household"
+          icon="plus"
+          onPress={createHousehold}
+          loading={creating}
+          disabled={!householdName.trim()}
+          testID="create-household-btn"
+        />
+
+        <View style={styles.divider}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>OR</Text>
+          <View style={styles.dividerLine} />
+        </View>
+
+        <TextField
+          placeholder="Invite code"
+          leftIcon="key"
+          autoCapitalize="characters"
+          value={inviteCode}
+          onChangeText={setInviteCode}
+          returnKeyType="done"
+          onSubmitEditing={joinHousehold}
+          testID="join-household-input"
+        />
+        <SecondaryButton
+          label="Join with invite code"
+          icon="user-plus"
+          variant="outline"
+          onPress={joinHousehold}
+          loading={joining}
+          disabled={!inviteCode.trim()}
+          testID="join-household-btn"
+        />
+      </View>
     </AppScreen>
   );
 }
@@ -317,16 +317,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconPressed: { opacity: 0.7 },
-
   householdList: { paddingVertical: spacing.sm, paddingRight: spacing.xl },
-
+  section: { marginTop: spacing.sm, marginBottom: spacing.xl },
+  manageLink: { ...type.button, color: colors.primary },
   actionCard: {
     backgroundColor: colors.surface,
     borderRadius: radii.xxl,
     borderWidth: 1,
     borderColor: colors.hairline,
     padding: spacing.lg,
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
     marginBottom: spacing.xl,
   },
   divider: {
@@ -337,10 +337,6 @@ const styles = StyleSheet.create({
   },
   dividerLine: { flex: 1, height: 1, backgroundColor: colors.hairline },
   dividerText: { ...type.caption, color: colors.subtle, letterSpacing: 1.5 },
-
-  section: { marginTop: spacing.sm },
-  manageLink: { ...type.button, color: colors.primary },
-
   listCard: {
     flexDirection: 'row',
     alignItems: 'center',
