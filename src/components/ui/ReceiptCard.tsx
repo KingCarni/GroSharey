@@ -33,8 +33,7 @@ export function ReceiptCard({
     day: 'numeric',
     year: 'numeric',
   });
-  const totalLabel =
-    totalAmount == null ? 'Pending' : formatMoney(totalAmount, currency);
+  const totalLabel = totalAmount == null ? 'Pending' : formatMoney(totalAmount, currency);
 
   return (
     <Pressable
@@ -66,21 +65,24 @@ export function ReceiptCard({
 
 function formatMoney(amount: number, currency: string) {
   const value = Number(amount).toFixed(2);
-  return `${currency || 'USD'} $${value}`;
+  return `${currency || 'CAD'} $${value}`;
 }
 
 function statusStyle(status: string): { bg: string; fg: string; label: string } {
   switch (status) {
     case 'manual':
-      return { bg: colors.primaryTint, fg: colors.primary, label: 'Logged manually' };
+      return { bg: colors.primaryTint, fg: colors.primary, label: 'Edited manually' };
+    case 'complete':
     case 'parsed':
-      return { bg: colors.successSoft, fg: colors.success, label: 'Parsed' };
+      return { bg: colors.successSoft, fg: colors.success, label: 'Receipt parsed' };
+    case 'processing':
+      return { bg: colors.primaryTint, fg: colors.primary, label: 'Reading receipt…' };
     case 'error':
     case 'failed':
       return { bg: colors.dangerSoft, fg: colors.danger, label: 'Parse failed' };
     case 'pending':
     default:
-      return { bg: colors.bgWarm, fg: colors.accentInk, label: 'Parsing pending' };
+      return { bg: colors.bgWarm, fg: colors.accentInk, label: 'Queued for parsing' };
   }
 }
 
