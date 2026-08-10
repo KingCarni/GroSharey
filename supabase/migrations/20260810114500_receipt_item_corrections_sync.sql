@@ -1,5 +1,14 @@
 -- Keep corrected receipt line items and derived price observations in sync.
 
+-- Household members may correct parser output, remove false positives, or add a missed line.
+drop policy if exists receipt_items_insert on public.receipt_items;
+create policy receipt_items_insert on public.receipt_items for insert to authenticated
+with check (public.is_household_member(household_id));
+
+drop policy if exists receipt_items_delete on public.receipt_items;
+create policy receipt_items_delete on public.receipt_items for delete to authenticated
+using (public.is_household_member(household_id));
+
 -- One derived observation per parsed/corrected receipt item.
 create unique index if not exists price_observations_receipt_item_unique
   on public.price_observations(receipt_item_id)
