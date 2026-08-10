@@ -1,5 +1,10 @@
 -- Keep corrected receipt line items and derived price observations in sync.
 
+-- One derived observation per parsed/corrected receipt item.
+create unique index if not exists price_observations_receipt_item_unique
+  on public.price_observations(receipt_item_id)
+  where receipt_item_id is not null;
+
 create or replace function public.sync_receipt_item_price_observation()
 returns trigger
 language plpgsql
@@ -9,6 +14,7 @@ as $$
 declare
   receipt_row public.receipts%rowtype;
   effective_price numeric;
+  existing_observation_id uuid;
 begin
   if tg_op = 'DELETE' then
     delete from public.price_observations where receipt_item_id = old.id;
@@ -27,52 +33,56 @@ begin
     return new;
   end if;
 
-  insert into public.price_observations (
-    household_id,
-    receipt_id,
-    receipt_item_id,
-    raw_product_name,
-    price,
-    quantity,
-    unit_price,
-    currency,
-    observed_at,
-    source,
-    confidence,
-    is_community_eligible
-  ) values (
-    new.household_id,
-    new.receipt_id,
-    new.id,
-    coalesce(nullif(new.normalized_name, ''), new.raw_name),
-    effective_price,
-    new.quantity,
-    new.unit_price,
-    coalesce(receipt_row.currency, 'CAD'),
-    receipt_row.purchased_at,
-    'receipt',
-    new.confidence,
-    false
-  )
-  on conflict (receipt_item_id) do update set
-    household_id = excluded.household_id,
-    receipt_id = excluded.receipt_id,
-    raw_product_name = excluded.raw_product_name,
-    price = excluded.price,
-    quantity = excluded.quantity,
-    unit_price = excluded.unit_price,
-    currency = excluded.currency,
-    observed_at = excluded.observed_at,
-    confidence = excluded.confidence;
+  select id into existing_observation_id
+  from public.price_observations
+  where receipt_item_id = new.id
+  limit 1;
+
+  if existing_observation_id is null then
+    insert into public.price_observations (
+      household_id,
+      receipt_id,
+      receipt_item_id,
+      raw_product_name,
+      price,
+      quantity,
+      unit_price,
+      currency,
+      observed_at,
+      source,
+      confidence,
+      is_community_eligible
+    ) values (
+      new.household_id,
+      new.receipt_id,
+      new.id,
+      coalesce(nullif(new.normalized_name, ''), new.raw_name),
+      effective_price,
+      new.quantity,
+      new.unit_price,
+      coalesce(receipt_row.currency, 'CAD'),
+      receipt_row.purchased_at,
+      'receipt',
+      new.confidence,
+      false
+    );
+  else
+    update public.price_observations
+    set household_id = new.household_id,
+        receipt_id = new.receipt_id,
+        raw_product_name = coalesce(nullif(new.normalized_name, ''), new.raw_name),
+        price = effective_price,
+        quantity = new.quantity,
+        unit_price = new.unit_price,
+        currency = coalesce(receipt_row.currency, 'CAD'),
+        observed_at = receipt_row.purchased_at,
+        confidence = new.confidence
+    where id = existing_observation_id;
+  end if;
 
   return new;
 end;
 $$;
-
--- One derived observation per parsed/corrected receipt item.
-create unique index if not exists price_observations_receipt_item_unique
-  on public.price_observations(receipt_item_id)
-  where receipt_item_id is not null;
 
 drop trigger if exists sync_receipt_item_price_observation on public.receipt_items;
 create trigger sync_receipt_item_price_observation
