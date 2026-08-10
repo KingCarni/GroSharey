@@ -31,12 +31,9 @@ begin
   end if;
 
   select * into receipt_row from public.receipts where id = new.receipt_id;
-  if receipt_row.id is null then
-    return new;
-  end if;
+  if receipt_row.id is null then return new; end if;
 
   effective_price := coalesce(new.line_total, new.unit_price);
-
   if effective_price is null then
     delete from public.price_observations where receipt_item_id = new.id;
     return new;
@@ -49,37 +46,18 @@ begin
 
   if existing_observation_id is null then
     insert into public.price_observations (
-      household_id,
-      receipt_id,
-      receipt_item_id,
-      raw_product_name,
-      price,
-      quantity,
-      unit_price,
-      currency,
-      observed_at,
-      source,
-      confidence,
+      household_id, receipt_id, receipt_item_id, raw_product_name, price,
+      quantity, unit_price, currency, observed_at, source, confidence,
       is_community_eligible
     ) values (
-      new.household_id,
-      new.receipt_id,
-      new.id,
-      coalesce(nullif(new.normalized_name, ''), new.raw_name),
-      effective_price,
-      new.quantity,
-      new.unit_price,
-      coalesce(receipt_row.currency, 'CAD'),
-      receipt_row.purchased_at,
-      'receipt',
-      new.confidence,
-      false
+      new.household_id, new.receipt_id, new.id,
+      coalesce(nullif(new.normalized_name, ''), new.raw_name), effective_price,
+      new.quantity, new.unit_price, coalesce(receipt_row.currency, 'CAD'),
+      receipt_row.purchased_at, 'receipt', new.confidence, false
     );
   else
     update public.price_observations
-    set household_id = new.household_id,
-        receipt_id = new.receipt_id,
-        raw_product_name = coalesce(nullif(new.normalized_name, ''), new.raw_name),
+    set raw_product_name = coalesce(nullif(new.normalized_name, ''), new.raw_name),
         price = effective_price,
         quantity = new.quantity,
         unit_price = new.unit_price,
@@ -93,9 +71,11 @@ begin
 end;
 $$;
 
+-- Initial parser inserts already create their observations in process-receipts.
+-- Corrections/deletions are synchronized here without creating duplicates during parsing.
 drop trigger if exists sync_receipt_item_price_observation on public.receipt_items;
 create trigger sync_receipt_item_price_observation
-after insert or update or delete on public.receipt_items
+after update or delete on public.receipt_items
 for each row execute function public.sync_receipt_item_price_observation();
 
 -- If receipt-level date/currency changes, keep observations aligned.
