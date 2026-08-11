@@ -39,7 +39,7 @@ const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const googleVisionApiKey = Deno.env.get('GOOGLE_VISION_API_KEY');
 const openAiApiKey = Deno.env.get('OPENAI_API_KEY');
 const openAiModel = Deno.env.get('OPENAI_RECEIPT_MODEL') ?? 'gpt-5-mini';
-const parserVersion = 'vision-openai-v1';
+const parserVersion = 'vision-openai-v2';
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -67,6 +67,42 @@ function bytesToBase64(bytes: Uint8Array) {
     binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunk, bytes.length)));
   }
   return btoa(binary);
+}
+
+function numberOcrLines(rawText: string) {
+  return rawText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 1000)
+    .map((line, index) => `${index + 1}: ${line}`)
+    .join('\n');
+}
+
+function reconcileConfidence(parsed: ParsedReceipt): ParsedReceipt {
+  const pricedItems = parsed.items.filter((item) => item.line_total != null);
+  if (pricedItems.length === 0) return parsed;
+
+  const itemTotal = pricedItems.reduce((sum, item) => sum + Number(item.line_total ?? 0), 0);
+  const merchandiseTarget = parsed.total != null
+    ? Math.max(0, parsed.total - Number(parsed.tax ?? 0))
+    : parsed.subtotal;
+
+  if (merchandiseTarget == null || merchandiseTarget <= 0) return parsed;
+
+  const difference = Math.abs(itemTotal - merchandiseTarget);
+  const relativeDifference = difference / Math.max(merchandiseTarget, 1);
+
+  let ceiling = 1;
+  if (difference > 0.05 && relativeDifference > 0.1) ceiling = 0.45;
+  else if (difference > 0.05 && relativeDifference > 0.05) ceiling = 0.6;
+  else if (difference > 0.05 && relativeDifference > 0.02) ceiling = 0.72;
+  else if (difference > 0.05) ceiling = 0.85;
+
+  return {
+    ...parsed,
+    confidence: Math.min(parsed.confidence, ceiling),
+  };
 }
 
 async function extractTextWithGoogleVision(imageBytes: Uint8Array) {
@@ -130,7 +166,47 @@ const receiptSchema = {
 async function parseReceiptWithOpenAI(rawText: string, fallbackCurrency: string): Promise<ParsedReceipt> {
   if (!openAiApiKey) throw new Error('OPENAI_API_KEY is not configured.');
 
-  const prompt = `You are a grocery receipt parser. Convert OCR text into structured receipt data.\n\nRules:\n- Never invent items or prices.\n- Exclude subtotal, tax, deposits, discounts, loyalty savings and payment lines from items unless they are clearly purchased products.\n- Preserve abbreviated receipt text in raw_name.\n- normalized_name should be a conservative human-readable grocery product name.\n- quantity means number purchased when explicit; otherwise use 1 only when a single line clearly represents one unit, else null.\n- line_total is the amount charged for that product line after line-specific discounts when clear.\n- unit_price is per item/weight unit only when supported by the receipt.\n- Use null when uncertain.\n- Currency fallback is ${fallbackCurrency || 'CAD'}.\n\nOCR TEXT:\n${rawText.slice(0, 30000)}`;
+  const numberedText = numberOcrLines(rawText);
+  const prompt = `You are a grocery receipt parser. Convert OCR text into structured receipt data.
+
+The OCR lines below are numbered only to make adjacency clear. Do not include line numbers in raw_name.
+
+CORE RULES:
+- Never invent items, brands, quantities, discounts or prices.
+- Exclude subtotal, total, net sales, tax, deposits, loyalty summaries, payment/tender lines and savings-summary lines from items unless they are clearly purchased products.
+- Preserve the actual abbreviated product text in raw_name.
+- normalized_name should be conservative and human readable. Expand obvious grocery abbreviations, but do not guess a specific product variant that is not supported.
+- quantity means count purchased when explicit. Use 1 only when one product line clearly represents one unit. For weighted produce, prefer size + unit rather than treating the weight as quantity.
+- Use null when uncertain.
+- Currency fallback is ${fallbackCurrency || 'CAD'}.
+
+DISCOUNT ASSOCIATION RULES — FOLLOW THESE STRICTLY:
+- A sale, coupon, loyalty, member, Prime, digital coupon, markdown or percentage-discount line immediately following a product modifies ONLY the most recent product above it.
+- Discount lines continue to belong to that same product only while they are contiguous. Stop the moment the next product line begins.
+- NEVER carry a discount forward to the next product.
+- A sale line can contain BOTH the new sale price and the savings amount. Do not subtract both as separate discounts if they represent the same price transition.
+- Example:
+  ITEM                                    $2.99
+  *Sale*                         $2.69    -$0.30
+  Prime Extra 10.00%                      -$0.27
+  means the final line_total is $2.42. The $2.69 value is the intermediate sale price; -$0.30 already explains the change from $2.99 to $2.69, so do NOT subtract $2.69 or subtract the $0.30 twice.
+- If a product is $5.99 and the PREVIOUS product has a -$0.27 discount beneath it, the $5.99 product remains $5.99. Never bleed the previous discount into it.
+- line_total is the final amount charged for that product line after discounts that clearly belong to that product.
+- unit_price is the per-item or per-weight-unit price when explicitly supported. For a normal single-item line without a separate unit price, unit_price may equal line_total.
+
+QUANTITY / WEIGHT RULES:
+- Example: "3 @ $1.49 ea   $4.47" => quantity 3, unit_price 1.49, line_total 4.47.
+- Example: "1.90 lb @ $0.49/lb   $0.93" => size 1.90, unit "lb", unit_price 0.49, line_total 0.93; quantity may be null.
+- Do not create separate items from tare-weight lines.
+
+RECONCILIATION RULES:
+- Parse every actual purchased product line, even when multiple physical units are represented by one line with quantity > 1.
+- Sum of final item line_total values should be consistent with the merchandise amount actually paid, allowing for tax, deposits, fees, coupons and receipt rounding.
+- Do NOT force prices to reconcile by inventing adjustments. If the receipt is ambiguous, leave uncertain values null and lower confidence instead.
+- Receipt subtotal, tax and total must come from explicit receipt summary lines whenever possible.
+
+OCR TEXT:
+${numberedText.slice(0, 36000)}`;
 
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
@@ -163,7 +239,7 @@ async function parseReceiptWithOpenAI(rawText: string, fallbackCurrency: string)
   if (!outputText) throw new Error('OpenAI returned no structured receipt output.');
 
   const parsed = JSON.parse(outputText) as ParsedReceipt;
-  return {
+  return reconcileConfidence({
     merchant: parsed.merchant?.trim() || null,
     purchased_at: parsed.purchased_at || null,
     currency: parsed.currency?.trim().toUpperCase() || fallbackCurrency || 'CAD',
@@ -187,7 +263,7 @@ async function parseReceiptWithOpenAI(rawText: string, fallbackCurrency: string)
             confidence: clampConfidence(item.confidence),
           }))
       : [],
-  };
+  });
 }
 
 async function processReceipt(supabase: ReturnType<typeof createClient>, receipt: ReceiptRow) {
