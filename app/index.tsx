@@ -188,49 +188,78 @@ export default function HomeScreen() {
       )}
 
       {selectedHousehold ? (
-        <View style={styles.section}>
-          <SectionHeader
-            eyebrow={selectedName.toUpperCase()}
-            title="Shared lists"
-            trailing={
-              <Link
-                href={{ pathname: '/household/[id]', params: { id: selectedHousehold } }}
-                style={styles.manageLink}
-              >
-                Manage
-              </Link>
-            }
-          />
-          {lists.length === 0 ? (
-            <EmptyState
-              icon="shopping-cart"
-              title="No lists yet"
-              body="Create your first shared grocery list from household management."
-            />
-          ) : (
-            lists.map((item) => (
-              <Link
-                key={item.id}
-                href={{ pathname: '/list/[id]', params: { id: item.id } }}
-                asChild
-              >
-                <Pressable
-                  style={({ pressed }) => [styles.listCard, pressed && styles.listCardPressed]}
-                  testID={`list-card-${item.id}`}
+        <>
+          <View style={styles.section}>
+            <SectionHeader
+              eyebrow={selectedName.toUpperCase()}
+              title="Shared lists"
+              trailing={
+                <Link
+                  href={{ pathname: '/household/[id]', params: { id: selectedHousehold } }}
+                  style={styles.manageLink}
                 >
-                  <View style={styles.listIcon}>
-                    <Feather name="shopping-cart" size={18} color={colors.primary} />
+                  Manage
+                </Link>
+              }
+            />
+            {lists.length === 0 ? (
+              <EmptyState
+                icon="shopping-cart"
+                title="No lists yet"
+                body="Create your first shared grocery list from household management."
+              />
+            ) : (
+              lists.map((item) => (
+                <Link
+                  key={item.id}
+                  href={{ pathname: '/list/[id]', params: { id: item.id } }}
+                  asChild
+                >
+                  <Pressable
+                    style={({ pressed }) => [styles.listCard, pressed && styles.listCardPressed]}
+                    testID={`list-card-${item.id}`}
+                  >
+                    <View style={styles.listIcon}>
+                      <Feather name="shopping-cart" size={18} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.listTitle} numberOfLines={1}>{item.name}</Text>
+                      <Text style={styles.listSub}>Open shared grocery list</Text>
+                    </View>
+                    <Feather name="chevron-right" size={20} color={colors.subtle} />
+                  </Pressable>
+                </Link>
+              ))
+            )}
+          </View>
+
+          <View style={styles.quickSection}>
+            <SectionHeader eyebrow="HOUSEHOLD" title="Stay connected" />
+            <View style={styles.quickGrid}>
+              <Link href={{ pathname: '/household/[id]/chat', params: { id: selectedHousehold } }} asChild>
+                <Pressable style={({ pressed }) => [styles.quickCard, pressed && styles.listCardPressed]}>
+                  <View style={styles.quickIcon}>
+                    <Feather name="message-circle" size={20} color={colors.primary} />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.listTitle} numberOfLines={1}>{item.name}</Text>
-                    <Text style={styles.listSub}>Open shared grocery list</Text>
-                  </View>
-                  <Feather name="chevron-right" size={20} color={colors.subtle} />
+                  <Text style={styles.quickTitle}>Chat</Text>
+                  <Text style={styles.quickSub}>Message everyone in this household</Text>
+                  <Feather name="chevron-right" size={18} color={colors.subtle} />
                 </Pressable>
               </Link>
-            ))
-          )}
-        </View>
+
+              <Link href={{ pathname: '/household/[id]/receipts', params: { id: selectedHousehold } }} asChild>
+                <Pressable style={({ pressed }) => [styles.quickCard, pressed && styles.listCardPressed]}>
+                  <View style={styles.quickIcon}>
+                    <Feather name="file-text" size={20} color={colors.primary} />
+                  </View>
+                  <Text style={styles.quickTitle}>Receipts</Text>
+                  <Text style={styles.quickSub}>Capture, review and track spending</Text>
+                  <Feather name="chevron-right" size={18} color={colors.subtle} />
+                </Pressable>
+              </Link>
+            </View>
+          </View>
+        </>
       ) : (
         <EmptyState
           icon="users"
@@ -319,6 +348,7 @@ const styles = StyleSheet.create({
   iconPressed: { opacity: 0.7 },
   householdList: { paddingVertical: spacing.sm, paddingRight: spacing.xl },
   section: { marginTop: spacing.sm, marginBottom: spacing.xl },
+  quickSection: { marginBottom: spacing.xl },
   manageLink: { ...type.button, color: colors.primary },
   actionCard: {
     backgroundColor: colors.surface,
@@ -360,4 +390,26 @@ const styles = StyleSheet.create({
   },
   listTitle: { ...type.h3, color: colors.ink, fontSize: 16 },
   listSub: { ...type.caption, marginTop: 2 },
+  quickGrid: { gap: spacing.sm },
+  quickCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  quickIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: radii.pill,
+    backgroundColor: colors.primaryTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickTitle: { ...type.h3, color: colors.ink, minWidth: 74 },
+  quickSub: { ...type.caption, flex: 1 },
 });
