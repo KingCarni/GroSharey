@@ -140,6 +140,24 @@ $$;
 grant execute on function public.household_billing_summary(uuid) to authenticated;
 grant execute on function public.is_household_owner(uuid) to authenticated;
 
+-- Owner-only wrapper around the existing invite generator. This keeps the existing invite
+-- implementation intact while preventing members from generating new share codes.
+create or replace function public.owner_create_household_invite(target_household_id uuid)
+returns text
+language plpgsql
+security invoker
+set search_path = public
+as $$
+begin
+  if not public.is_household_owner(target_household_id) then
+    raise exception 'Only the household owner can create invite codes';
+  end if;
+  return public.create_household_invite(target_household_id);
+end;
+$$;
+
+grant execute on function public.owner_create_household_invite(uuid) to authenticated;
+
 -- Keep cached seat counts current whenever membership changes. Stripe quantity is reconciled
 -- by sync-stripe-seats after joins and whenever the billing screen is opened.
 create or replace function public.refresh_household_subscription_seats()
