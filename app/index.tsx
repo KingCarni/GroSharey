@@ -120,7 +120,12 @@ export default function HomeScreen() {
     if (error) return Alert.alert('Could not join household', error.message);
     setInviteCode('');
     await loadHouseholds();
-    if (typeof data === 'string') setSelectedHousehold(data);
+    if (typeof data === 'string') {
+      setSelectedHousehold(data);
+      // The joining member can safely request a seat reconciliation; the Edge Function
+      // derives quantity from active memberships and never trusts a client-supplied count.
+      void supabase.functions.invoke('sync-stripe-seats', { body: { household_id: data } });
+    }
     Alert.alert('Household joined', 'You now share lists and shopping updates with this household.');
   }
 
