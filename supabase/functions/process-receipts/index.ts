@@ -39,7 +39,7 @@ const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const googleVisionApiKey = Deno.env.get('GOOGLE_VISION_API_KEY');
 const openAiApiKey = Deno.env.get('OPENAI_API_KEY');
 const openAiModel = Deno.env.get('OPENAI_RECEIPT_MODEL') ?? 'gpt-5-mini';
-const parserVersion = 'vision-openai-v2';
+const parserVersion = 'vision-openai-v3';
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -77,6 +77,77 @@ function numberOcrLines(rawText: string) {
     .slice(0, 1000)
     .map((line, index) => `${index + 1}: ${line}`)
     .join('\n');
+}
+
+function normalizeMatchText(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+function moneyValues(line: string) {
+  const values: { value: number; negative: boolean }[] = [];
+  const regex = /(-?)\$\s*(\d+(?:\.\d{1,2})?)/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(line)) !== null) {
+    values.push({ value: Number(match[2]), negative: match[1] === '-' });
+  }
+  return values;
+}
+
+function tightenLineTotalsFromOcr(parsed: ParsedReceipt, rawText: string): ParsedReceipt {
+  const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0 || parsed.items.length === 0) return parsed;
+
+  const lineKeys = lines.map(normalizeMatchText);
+  const itemPositions = parsed.items.map((item) => {
+    const key = normalizeMatchText(item.raw_name);
+    if (!key) return -1;
+    return lineKeys.findIndex((line) => line.includes(key) || key.includes(line));
+  });
+
+  const discountPattern = /\b(SALE|PRIME|EXTRA|COUPON|LOYALTY|MEMBER|DISCOUNT|SAVINGS?|SAVE|OFF|MARKDOWN)\b/i;
+
+  const items = parsed.items.map((item, itemIndex) => {
+    const lineIndex = itemPositions[itemIndex] ?? -1;
+    if (lineIndex < 0) return item;
+
+    const itemMoney = moneyValues(lines[lineIndex] ?? '').filter((entry) => !entry.negative);
+    const baseAmount = itemMoney.at(-1)?.value ?? null;
+    if (baseAmount == null) return item;
+
+    const laterPositions = itemPositions.filter((position) => position > lineIndex);
+    const nextItemIndex = laterPositions.length ? Math.min(...laterPositions) : lines.length;
+    const end = Math.min(nextItemIndex, lineIndex + 6);
+
+    let discountTotal = 0;
+    let sawDiscount = false;
+    for (let i = lineIndex + 1; i < end; i += 1) {
+      const line = lines[i] ?? '';
+      if (!discountPattern.test(line)) {
+        if (sawDiscount) break;
+        continue;
+      }
+      const negatives = moneyValues(line).filter((entry) => entry.negative);
+      if (negatives.length === 0) continue;
+      sawDiscount = true;
+      discountTotal += negatives.reduce((sum, entry) => sum + entry.value, 0);
+    }
+
+    if (!sawDiscount || discountTotal <= 0 || discountTotal >= baseAmount) return item;
+
+    const computed = Math.round((baseAmount - discountTotal + Number.EPSILON) * 100) / 100;
+    const existing = item.line_total;
+    const differs = existing == null || Math.abs(existing - computed) >= 0.01;
+    if (!differs) return item;
+
+    return {
+      ...item,
+      line_total: computed,
+      unit_price: item.quantity === 1 && item.size == null ? computed : item.unit_price,
+      confidence: Math.min(item.confidence, 0.88),
+    };
+  });
+
+  return { ...parsed, items };
 }
 
 function reconcileConfidence(parsed: ParsedReceipt): ParsedReceipt {
@@ -181,17 +252,25 @@ CORE RULES:
 - Currency fallback is ${fallbackCurrency || 'CAD'}.
 
 DISCOUNT ASSOCIATION RULES — FOLLOW THESE STRICTLY:
-- A sale, coupon, loyalty, member, Prime, digital coupon, markdown or percentage-discount line immediately following a product modifies ONLY the most recent product above it.
+- Treat each product plus the contiguous sale/coupon/Prime/member lines immediately beneath it as one pricing block.
+- A sale, coupon, loyalty, member, Prime, digital coupon, markdown or percentage-discount line modifies ONLY the most recent product above it.
 - Discount lines continue to belong to that same product only while they are contiguous. Stop the moment the next product line begins.
 - NEVER carry a discount forward to the next product.
-- A sale line can contain BOTH the new sale price and the savings amount. Do not subtract both as separate discounts if they represent the same price transition.
+- Start arithmetic from the product's ORIGINAL price shown on its product line. Then subtract every explicit negative savings amount in that product's contiguous discount block exactly once.
+- If a sale line shows an intermediate sale price plus a negative savings amount, the intermediate sale price is informational. Use the negative savings amount for arithmetic and do not treat the intermediate price as another discount.
+- Percentage labels such as "Prime Extra 10.00%" are descriptive when the same line also prints a negative dollar amount. Use the printed negative dollar amount; do not calculate the percentage a second time.
 - Example:
   ITEM                                    $2.99
   *Sale*                         $2.69    -$0.30
   Prime Extra 10.00%                      -$0.27
-  means the final line_total is $2.42. The $2.69 value is the intermediate sale price; -$0.30 already explains the change from $2.99 to $2.69, so do NOT subtract $2.69 or subtract the $0.30 twice.
-- If a product is $5.99 and the PREVIOUS product has a -$0.27 discount beneath it, the $5.99 product remains $5.99. Never bleed the previous discount into it.
-- line_total is the final amount charged for that product line after discounts that clearly belong to that product.
+  means final line_total = 2.99 - 0.30 - 0.27 = 2.42.
+- Example:
+  BAR                                     $1.79
+  *Sale*                         $5.00    -$0.79
+  Prime Extra 10.00%                      -$0.10
+  means final line_total = 1.79 - 0.79 - 0.10 = 0.90. The $5.00 is promotion context, not the final price for this single line.
+- If the next product is $5.99, a discount from the previous block must never change that $5.99.
+- line_total is the final amount charged for that product line after all explicit discounts in its own block.
 - unit_price is the per-item or per-weight-unit price when explicitly supported. For a normal single-item line without a separate unit price, unit_price may equal line_total.
 
 QUANTITY / WEIGHT RULES:
@@ -202,6 +281,7 @@ QUANTITY / WEIGHT RULES:
 RECONCILIATION RULES:
 - Parse every actual purchased product line, even when multiple physical units are represented by one line with quantity > 1.
 - Sum of final item line_total values should be consistent with the merchandise amount actually paid, allowing for tax, deposits, fees, coupons and receipt rounding.
+- Before returning, mentally recompute every product with a discount block from original product price minus explicit negative dollar savings. Recheck that no discount was assigned to the next product.
 - Do NOT force prices to reconcile by inventing adjustments. If the receipt is ambiguous, leave uncertain values null and lower confidence instead.
 - Receipt subtotal, tax and total must come from explicit receipt summary lines whenever possible.
 
@@ -239,7 +319,7 @@ ${numberedText.slice(0, 36000)}`;
   if (!outputText) throw new Error('OpenAI returned no structured receipt output.');
 
   const parsed = JSON.parse(outputText) as ParsedReceipt;
-  return reconcileConfidence({
+  const sanitized: ParsedReceipt = {
     merchant: parsed.merchant?.trim() || null,
     purchased_at: parsed.purchased_at || null,
     currency: parsed.currency?.trim().toUpperCase() || fallbackCurrency || 'CAD',
@@ -263,7 +343,9 @@ ${numberedText.slice(0, 36000)}`;
             confidence: clampConfidence(item.confidence),
           }))
       : [],
-  });
+  };
+
+  return reconcileConfidence(tightenLineTotalsFromOcr(sanitized, rawText));
 }
 
 async function processReceipt(supabase: ReturnType<typeof createClient>, receipt: ReceiptRow) {
