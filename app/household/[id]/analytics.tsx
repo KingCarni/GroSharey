@@ -38,11 +38,21 @@ type JoinedItem = ReceiptItem & {
   store: string;
   purchasedAt: string | null;
   displayName: string;
-  observedPrice: number;
+  spendPrice: number;
+  comparisonPrice: number;
 };
 
 type AnalyticsMode = 'Overview' | 'Items' | 'Stores' | 'Brands' | 'Categories';
 const modes: AnalyticsMode[] = ['Overview', 'Items', 'Stores', 'Brands', 'Categories'];
+
+function priceForComparison(item: ReceiptItem) {
+  const explicitUnitPrice = Number(item.unit_price ?? 0);
+  if (explicitUnitPrice > 0) return explicitUnitPrice;
+  const lineTotal = Number(item.line_total ?? 0);
+  const quantity = Number(item.quantity ?? 0);
+  if (lineTotal > 0 && quantity > 1) return lineTotal / quantity;
+  return lineTotal;
+}
 
 export default function AnalyticsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -96,7 +106,8 @@ export default function AnalyticsScreen() {
         store: receipt?.store_name?.trim() || 'Unknown store',
         purchasedAt: receipt?.purchased_at ?? null,
         displayName: item.normalized_name?.trim() || item.raw_name?.trim() || 'Unknown item',
-        observedPrice: Number(item.line_total ?? item.unit_price ?? 0),
+        spendPrice: Number(item.line_total ?? item.unit_price ?? 0),
+        comparisonPrice: priceForComparison(item),
       };
     });
   }, [items, receipts]);
@@ -122,7 +133,7 @@ export default function AnalyticsScreen() {
     let pricedItems = 0;
 
     for (const item of joinedItems) {
-      const price = item.observedPrice;
+      const price = item.spendPrice;
       if (price > 0) {
         itemSpend += price;
         pricedItems += 1;
@@ -163,11 +174,11 @@ export default function AnalyticsScreen() {
   const itemPriceComparison = useMemo(() => {
     const map = new Map<string, Map<string, number[]>>();
     for (const item of joinedItems) {
-      if (item.observedPrice <= 0) continue;
+      if (item.comparisonPrice <= 0) continue;
       const key = item.displayName.toLowerCase();
       const stores = map.get(key) ?? new Map<string, number[]>();
       const values = stores.get(item.store) ?? [];
-      values.push(item.observedPrice);
+      values.push(item.comparisonPrice);
       stores.set(item.store, values);
       map.set(key, stores);
     }
@@ -221,12 +232,7 @@ export default function AnalyticsScreen() {
       </View>
 
       {selectedStore && selectedStoreSummary ? (
-        <StoreDetail
-          store={selectedStore}
-          summary={selectedStoreSummary}
-          items={filteredItems}
-          comparison={itemPriceComparison}
-        />
+        <StoreDetail store={selectedStore} summary={selectedStoreSummary} items={filteredItems} comparison={itemPriceComparison} />
       ) : (
         <>
           {mode === 'Overview' && <Overview metrics={metrics} receipts={receipts} onOpenStore={setSelectedStore} />}
@@ -301,7 +307,6 @@ function Overview({ metrics, receipts, onOpenStore }: {
   );
 }
 
-// Helper type hook used only to keep Overview's metrics prop strongly typed without duplicating its shape.
 function useAnalyticsMetrics() {
   return {
     totalSpend: 0, average: 0, stores: [] as [string, { spend: number; trips: number }][], maxStoreTotal: 0,
@@ -341,7 +346,7 @@ function ItemResults({ items, comparison }: { items: JoinedItem[]; comparison: M
   return (
     <Panel><SectionHeader eyebrow="ITEMS" title="Item price history" />
       {grouped.length === 0 ? <Text style={styles.muted}>No parsed items match that search.</Text> : grouped.map(([name, rows], index) => {
-        const avg = average(rows.map((item) => item.observedPrice).filter((value) => value > 0));
+        const avg = average(rows.map((item) => item.comparisonPrice).filter((value) => value > 0));
         const stores = comparison.get(name.toLowerCase())?.size ?? 0;
         return <View key={name} style={[styles.row, index > 0 && styles.rowBordered]}><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{name}</Text><Text style={styles.rowMeta}>{rows.length} observations · {stores} {stores === 1 ? 'store' : 'stores'}</Text></View><Text style={styles.rowAmount}>{avg ? `$${avg.toFixed(2)} avg` : '—'}</Text></View>;
       })}
@@ -361,7 +366,7 @@ function StoreDetail({ store, summary, items, comparison }: { store: string; sum
       <Panel>
         <SectionHeader eyebrow="PRICE CHECK" title="Items at this store" />
         {grouped.length === 0 ? <Text style={styles.muted}>No items match that search.</Text> : grouped.map(([name, rows], index) => {
-          const here = average(rows.map((item) => item.observedPrice).filter((value) => value > 0));
+          const here = average(rows.map((item) => item.comparisonPrice).filter((value) => value > 0));
           const storeMap = comparison.get(name.toLowerCase());
           const elsewhere = storeMap ? [...storeMap.entries()]
             .filter(([otherStore]) => otherStore !== store)
