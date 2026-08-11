@@ -257,6 +257,17 @@ export default function HomeScreen() {
                   <Feather name="chevron-right" size={18} color={colors.subtle} />
                 </Pressable>
               </Link>
+
+              <Link href={{ pathname: '/household/[id]/analytics', params: { id: selectedHousehold } }} asChild>
+                <Pressable style={({ pressed }) => [styles.quickCard, pressed && styles.listCardPressed]}>
+                  <View style={styles.quickIcon}>
+                    <Feather name="bar-chart-2" size={20} color={colors.primary} />
+                  </View>
+                  <Text style={styles.quickTitle}>Analytics</Text>
+                  <Text style={styles.quickSub}>See spending, stores and parsed item trends</Text>
+                  <Feather name="chevron-right" size={18} color={colors.subtle} />
+                </Pressable>
+              </Link>
             </View>
           </View>
         </>
