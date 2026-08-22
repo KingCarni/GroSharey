@@ -84,11 +84,18 @@ type PendingImage = {
   fileName?: string | null;
 };
 
+type BillingSummary = {
+  status: string;
+};
+
+const paidStatuses = new Set(['active', 'trialing', 'past_due', 'comped']);
+
 export default function ReceiptsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
   const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [canParse, setCanParse] = useState(false);
   const [storeName, setStoreName] = useState('');
   const [total, setTotal] = useState('');
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
@@ -113,12 +120,13 @@ export default function ReceiptsScreen() {
     if (!id) return;
     let cancelled = false;
     async function initial() {
-      await loadReceipts();
+      await Promise.all([loadReceipts(), loadBilling()]);
       if (!cancelled) setInitialLoading(false);
     }
     void initial();
     const channel = supabase.channel(`receipts:${id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts', filter: `household_id=eq.${id}` }, loadReceipts)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'household_subscriptions', filter: `household_id=eq.${id}` }, loadBilling)
       .subscribe();
     return () => {
       cancelled = true;
@@ -126,6 +134,13 @@ export default function ReceiptsScreen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  async function loadBilling() {
+    const { data, error } = await supabase.rpc('household_billing_summary', { target_household_id: id });
+    if (error) return;
+    const row = (Array.isArray(data) ? data[0] : data) as BillingSummary | null;
+    setCanParse(!!row && paidStatuses.has(row.status));
+  }
 
   async function loadReceipts() {
     const { data, error } = await supabase
@@ -152,7 +167,7 @@ export default function ReceiptsScreen() {
 
   async function refreshReceipts() {
     setRefreshing(true);
-    await loadReceipts();
+    await Promise.all([loadReceipts(), loadBilling()]);
     setRefreshing(false);
   }
 
@@ -232,14 +247,19 @@ export default function ReceiptsScreen() {
         storage_path: path,
         store_name: storeName.trim() || null,
         total_amount: parsedTotal,
-        parse_status: 'pending',
+        parse_status: canParse ? 'pending' : 'manual',
       });
       if (insertError) throw insertError;
       setPendingImage(null);
       setStoreName('');
       setTotal('');
       await loadReceipts();
-      Alert.alert('Receipt saved', 'We’ll read the receipt and add its line items automatically.');
+      Alert.alert(
+        'Receipt saved',
+        canParse
+          ? 'We’ll read the receipt and add its line items automatically.'
+          : 'Your receipt is stored. AI line-item parsing is included with GroSharey Shared.',
+      );
     } catch (error) {
       if (uploadedPath) await supabase.storage.from('receipts').remove([uploadedPath]);
       Alert.alert('Could not save receipt', error instanceof Error ? error.message : 'Unknown upload error');
@@ -425,7 +445,7 @@ export default function ReceiptsScreen() {
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshReceipts} />}
         ListHeaderComponent={<>
-          <AppHeader title="Receipts" eyebrow="TRACK SPEND" subtitle="Capture, parse, review and correct every shopping trip." onBack={() => router.back()} />
+          <AppHeader title="Receipts" eyebrow="TRACK SPEND" subtitle={canParse ? 'Capture, parse, review and correct every shopping trip.' : 'Store receipt photos and totals for free. AI line-item parsing is included with GroSharey Shared.'} onBack={() => router.back()} />
           <View style={styles.summaryRow}>
             <SummaryBox label="TOTAL SPEND" value={`$${summary.spend.toFixed(2)}`} />
             <SummaryBox label="AVG. TRIP" value={`$${summary.average.toFixed(2)}`} />
@@ -443,17 +463,18 @@ export default function ReceiptsScreen() {
                 <TextField containerStyle={{ flex: 1 }} label="Store (optional)" placeholder="Safeway…" leftIcon="shopping-bag" value={storeName} onChangeText={setStoreName} />
                 <TextField containerStyle={styles.totalField} label="Total (optional)" placeholder="0.00" leftIcon="dollar-sign" keyboardType="decimal-pad" value={total} onChangeText={setTotal} />
               </View>
-              <PrimaryButton label="Save & parse receipt" icon="check" onPress={savePendingReceipt} loading={busy} />
+              <PrimaryButton label={canParse ? 'Save & parse receipt' : 'Save receipt'} icon="check" onPress={savePendingReceipt} loading={busy} />
+              {!canParse && <Text style={styles.upgradeHint}>Upgrade to GroSharey Shared to automatically read line items, brands, quantities and prices.</Text>}
               <Pressable onPress={() => setPendingImage(null)} style={styles.cancelCapture}><Text style={styles.cancelCaptureText}>Cancel</Text></Pressable>
             </> : <>
-              <Text style={styles.captureHelp}>Take a photo or choose one from your phone. GroSharey will OCR the receipt and extract line-item prices automatically.</Text>
+              <Text style={styles.captureHelp}>{canParse ? 'Take a photo or choose one from your phone. GroSharey will OCR the receipt and extract line-item prices automatically.' : 'Take a photo or choose one from your phone. Free accounts can store the receipt and enter store/total manually.'}</Text>
               <PrimaryButton label="Take photo" icon="camera" onPress={selectFromCamera} />
               <SecondaryButton label="Choose from photos" icon="image" onPress={selectFromLibrary} variant="outline" />
             </>}
           </Panel>
           <SectionHeader eyebrow="HISTORY" title="Recent receipts" trailing={<Text style={type.caption}>{receipts.length} total</Text>} />
         </>}
-        ListEmptyComponent={<EmptyState icon="file-text" title="No receipts yet" body="Capture your first receipt above. Parsed prices will feed spending and price analytics." />}
+        ListEmptyComponent={<EmptyState icon="file-text" title="No receipts yet" body={canParse ? 'Capture your first receipt above. Parsed prices will feed spending and price analytics.' : 'Capture your first receipt above. You can store photos and totals on the free plan.'} />}
         renderItem={({ item }) => <ReceiptCard
           storeName={item.store_name}
           totalAmount={item.total_amount}
@@ -489,9 +510,9 @@ export default function ReceiptsScreen() {
                 {preview?.parse_confidence != null && <Text style={styles.confidenceText}>{Math.round(preview.parse_confidence * 100)}% parse confidence</Text>}
               </View>
               <SectionHeader eyebrow="PARSED ITEMS" title={`${previewItems.length} line ${previewItems.length === 1 ? 'item' : 'items'}`} />
-              {previewItems.length === 0 ? <Text style={styles.captureHelp}>No parsed line items were saved for this receipt.</Text> : previewItems.map((item) => <ParsedItemRow key={item.id} item={item} currency={preview?.currency ?? 'CAD'} />)}
+              {previewItems.length === 0 ? <Text style={styles.captureHelp}>{preview?.parse_status === 'manual' ? 'This receipt is stored without AI parsing.' : 'No parsed line items were saved for this receipt.'}</Text> : previewItems.map((item) => <ParsedItemRow key={item.id} item={item} currency={preview?.currency ?? 'CAD'} />)}
               <View style={styles.previewButtons}>
-                <SecondaryButton label="Edit parsed details" icon="edit-2" onPress={() => { if (preview) void openEdit(preview); setPreview(null); }} fullWidth={false} />
+                <SecondaryButton label="Edit receipt details" icon="edit-2" onPress={() => { if (preview) void openEdit(preview); setPreview(null); }} fullWidth={false} />
                 <SecondaryButton label="Delete" icon="trash-2" onPress={() => preview && confirmDeleteReceipt(preview)} fullWidth={false} variant="outline" />
               </View>
             </ScrollView>
@@ -505,8 +526,8 @@ export default function ReceiptsScreen() {
           <View style={styles.editSheet}>
             <View style={styles.sheetHandle} />
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.editContent}>
-              <SectionHeader eyebrow="RECEIPT DETAILS" title="Review parsed receipt" />
-              <Text style={styles.captureHelp}>Correct anything the parser got wrong. Your changes also update the price-history data derived from this receipt.</Text>
+              <SectionHeader eyebrow="RECEIPT DETAILS" title="Review receipt" />
+              <Text style={styles.captureHelp}>Correct receipt details and any parsed line items that are available.</Text>
               <TextField label="Store" placeholder="Store name" leftIcon="shopping-bag" value={editStore} onChangeText={setEditStore} />
               <View style={styles.threeFields}>
                 <TextField containerStyle={{ flex: 1 }} label="Subtotal" placeholder="0.00" keyboardType="decimal-pad" value={editSubtotal} onChangeText={setEditSubtotal} />
@@ -514,10 +535,10 @@ export default function ReceiptsScreen() {
                 <TextField containerStyle={{ flex: 1 }} label="Total" placeholder="0.00" keyboardType="decimal-pad" value={editTotal} onChangeText={setEditTotal} />
               </View>
               <TextField label="Purchase date" placeholder="YYYY-MM-DD" leftIcon="calendar" value={editDate} onChangeText={setEditDate} autoCapitalize="none" />
-              <SectionHeader eyebrow="LINE ITEMS" title="Parsed groceries" trailing={<Pressable onPress={addMissingItem}><Text style={styles.addItemText}>+ Add item</Text></Pressable>} />
-              {itemsLoading ? <LoadingState label="Loading parsed items" /> : editItems.filter((item) => !item.deleted).map((item) => <EditableItemCard key={item.id} item={item} onChange={updateEditItem} onRemove={removeEditItem} />)}
-              {!itemsLoading && editItems.filter((item) => !item.deleted).length === 0 && <EmptyState icon="shopping-bag" title="No line items" body="Add a missing item manually or save the receipt-level details as-is." />}
-              <PrimaryButton label="Save receipt & item corrections" icon="check" loading={savingEdit} onPress={saveReceiptEdits} />
+              <SectionHeader eyebrow="LINE ITEMS" title="Receipt items" trailing={<Pressable onPress={addMissingItem}><Text style={styles.addItemText}>+ Add item</Text></Pressable>} />
+              {itemsLoading ? <LoadingState label="Loading receipt items" /> : editItems.filter((item) => !item.deleted).map((item) => <EditableItemCard key={item.id} item={item} onChange={updateEditItem} onRemove={removeEditItem} />)}
+              {!itemsLoading && editItems.filter((item) => !item.deleted).length === 0 && <EmptyState icon="shopping-bag" title="No line items" body="Add items manually or save the receipt-level details as-is." />}
+              <PrimaryButton label="Save receipt changes" icon="check" loading={savingEdit} onPress={saveReceiptEdits} />
               <SecondaryButton label="Cancel" onPress={() => setEditing(null)} variant="ghost" />
             </ScrollView>
           </View>
@@ -593,7 +614,7 @@ function EditableItemCard({ item, onChange, onRemove }: { item: EditableReceiptI
 
 function friendlyStatus(status?: string) {
   switch (status) {
-    case 'manual': return 'Details entered manually';
+    case 'manual': return 'Stored without AI parsing';
     case 'complete':
     case 'parsed': return 'Receipt parsed';
     case 'processing': return 'Reading receipt…';
@@ -611,6 +632,7 @@ const styles = StyleSheet.create({
   summaryLabel: { ...type.caption, color: colors.subtle, fontSize: 9, letterSpacing: 0.8 },
   summaryValue: { ...type.h3, color: colors.primary, fontSize: 17, marginTop: 4 },
   captureHelp: { ...type.bodySmall, color: colors.muted, lineHeight: 20, marginBottom: spacing.md },
+  upgradeHint: { ...type.caption, color: colors.accentInk, textAlign: 'center', marginTop: spacing.sm },
   pendingImage: { width: '100%', aspectRatio: 4 / 5, maxHeight: 420, backgroundColor: colors.surfaceInk, borderRadius: radii.lg, marginBottom: spacing.md },
   captureActions: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
   formRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.sm },
