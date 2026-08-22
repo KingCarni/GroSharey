@@ -49,7 +49,6 @@ $$;
 
 grant execute on function public.household_has_access(uuid) to authenticated, service_role;
 
--- Existing function has the same return shape, so it can be replaced safely.
 create or replace function public.household_billing_summary(target_household_id uuid)
 returns table (
   is_owner boolean,
@@ -91,7 +90,6 @@ $$;
 
 grant execute on function public.household_billing_summary(uuid) to authenticated;
 
--- Free users can create/use a household alone, but sharing requires a paid plan.
 create or replace function public.owner_create_household_invite(target_household_id uuid)
 returns text
 language plpgsql
@@ -113,8 +111,6 @@ $$;
 
 grant execute on function public.owner_create_household_invite(uuid) to authenticated;
 
--- Backstop invite acceptance at the database layer. This prevents a free household
--- from gaining a second active member through an old invite or direct RPC path.
 create or replace function public.enforce_paid_household_sharing()
 returns trigger
 language plpgsql
@@ -132,7 +128,7 @@ begin
   from public.household_memberships hm
   where hm.household_id = new.household_id
     and hm.status = 'active'
-    and hm.id <> new.id;
+    and (new.id is null or hm.id <> new.id);
 
   -- The first active member (the owner) is always free.
   if existing_active >= 1 and not public.household_has_paid_plan(new.household_id) then
@@ -176,3 +172,12 @@ drop trigger if exists enforce_receipt_parse_entitlement on public.receipts;
 create trigger enforce_receipt_parse_entitlement
 before insert or update of parse_status, household_id on public.receipts
 for each row execute function public.enforce_receipt_parse_entitlement();
+
+-- Prevent old queued rows from consuming OCR/AI after this migration is applied.
+update public.receipts r
+set parse_status = 'manual',
+    parse_error = null,
+    parse_confidence = null,
+    parsed_at = null
+where r.parse_status = 'pending'
+  and not public.household_has_paid_plan(r.household_id);
