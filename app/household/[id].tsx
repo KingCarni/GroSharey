@@ -42,6 +42,8 @@ type BillingSummary = {
   cancel_at_period_end: boolean;
 };
 
+const paidStatuses = new Set(['active', 'trialing', 'past_due', 'comped']);
+
 export default function HouseholdScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -102,10 +104,13 @@ export default function HouseholdScreen() {
     };
   }, [id, loadHousehold]);
 
+  const billingStatus = billing?.status;
+  const billingMembers = billing?.active_members;
+
   useEffect(() => {
-    if (!id || !billing || !['active', 'trialing', 'past_due'].includes(billing.status)) return;
+    if (!id || !billingStatus || !paidStatuses.has(billingStatus)) return;
     void supabase.functions.invoke('sync-stripe-seats', { body: { household_id: id } });
-  }, [billing?.active_members, billing?.status, id]);
+  }, [billingMembers, billingStatus, id]);
 
   async function createList() {
     if (!listName.trim()) return;
@@ -118,6 +123,9 @@ export default function HouseholdScreen() {
 
   async function createInvite() {
     if (!billing?.is_owner) return Alert.alert('Owner only', 'Only the household owner can create or share invite codes.');
+    if (!paidStatuses.has(billing.status)) {
+      return Alert.alert('Upgrade to share', 'GroSharey is free for one person. Subscribe for $5/month to invite your first member and unlock AI receipt parsing.');
+    }
     setCreatingInvite(true);
     const { data, error } = await supabase.rpc('owner_create_household_invite', { target_household_id: id });
     setCreatingInvite(false);
@@ -129,12 +137,12 @@ export default function HouseholdScreen() {
   }
 
   async function shareInvite(code: string) {
-    if (!billing?.is_owner) return;
+    if (!billing?.is_owner || !paidStatuses.has(billing.status)) return;
     await Share.share({ message: `Join my GroSharey household with invite code: ${code}` });
   }
 
   async function copyInvite(code: string) {
-    if (!billing?.is_owner) return;
+    if (!billing?.is_owner || !paidStatuses.has(billing.status)) return;
     await Clipboard.setStringAsync(code);
     Alert.alert('Invite copied', `${code} is on your clipboard.`);
   }
@@ -165,8 +173,9 @@ export default function HouseholdScreen() {
     );
   }
 
-  const monthly = ((billing?.monthly_cents ?? 500) / 100).toFixed(2);
-  const activeSubscription = !!billing && ['active', 'trialing', 'past_due'].includes(billing.status);
+  const activeSubscription = !!billing && paidStatuses.has(billing.status);
+  const monthly = activeSubscription ? ((billing?.monthly_cents ?? 500) / 100).toFixed(2) : '0.00';
+  const extraSeatLabel = billing?.extra_seats === 1 ? 'extra seat' : 'extra seats';
 
   return (
     <AppScreen scroll padded={false} contentContainerStyle={styles.scroll}>
@@ -192,7 +201,7 @@ export default function HouseholdScreen() {
             <View style={styles.avatar}><Text style={styles.avatarText}>{(member.profiles?.display_name?.trim().charAt(0) ?? '?').toUpperCase()}</Text></View>
             <View style={{ flex: 1 }}>
               <Text style={styles.memberName}>{member.profiles?.display_name || 'GroSharey member'}</Text>
-              <Text style={styles.memberRole}>{member.role === 'owner' ? 'Owner · pays for household' : 'Member'}</Text>
+              <Text style={styles.memberRole}>{member.role === 'owner' ? (activeSubscription ? 'Owner · manages subscription' : 'Owner · free plan') : 'Member'}</Text>
             </View>
             {member.role === 'owner' && <View style={styles.rolePill}><Feather name="star" size={11} color={colors.accentInk} /><Text style={styles.rolePillText}>Owner</Text></View>}
           </View>
@@ -200,19 +209,25 @@ export default function HouseholdScreen() {
       </Panel>
 
       <Panel>
-        <SectionHeader eyebrow="SUBSCRIPTION" title={`$${monthly}/month`} trailing={<Text style={styles.statusText}>{billing?.status ?? 'inactive'}</Text>} />
+        <SectionHeader
+          eyebrow="PLAN"
+          title={activeSubscription ? `$${monthly}/month` : 'Free plan'}
+          trailing={<Text style={styles.statusText}>{activeSubscription ? 'Shared' : 'Solo'}</Text>}
+        />
         <Text style={[type.body, styles.billingCopy]}>
-          $5.00/month includes the household owner plus one member. Each additional active member is $2.49/month.
+          {activeSubscription
+            ? '$5.00/month includes you plus one member and AI receipt parsing. Each additional active member adds $2.49/month.'
+            : 'Personal GroSharey is free. Upgrade for $5.00/month to share with one other person and unlock AI receipt parsing. Each additional active member is $2.49/month.'}
         </Text>
         <View style={styles.billingStats}>
           <View style={styles.billingStat}><Text style={styles.billingNumber}>{billing?.active_members ?? members.length}</Text><Text style={styles.metaSmall}>active members</Text></View>
-          <View style={styles.billingStat}><Text style={styles.billingNumber}>{billing?.extra_seats ?? Math.max(members.length - 2, 0)}</Text><Text style={styles.metaSmall}>extra seats</Text></View>
+          <View style={styles.billingStat}><Text style={styles.billingNumber}>{activeSubscription ? billing?.extra_seats ?? 0 : 0}</Text><Text style={styles.metaSmall}>{extraSeatLabel}</Text></View>
         </View>
         {billing?.is_owner ? (
           activeSubscription ? (
             <SecondaryButton label="Manage subscription" icon="credit-card" variant="outline" onPress={manageSubscription} loading={billingBusy} />
           ) : (
-            <PrimaryButton label={`Subscribe for $${monthly}/month`} icon="credit-card" onPress={startSubscription} loading={billingBusy} />
+            <PrimaryButton label="Upgrade & share — $5.00/month" icon="credit-card" onPress={startSubscription} loading={billingBusy} />
           )
         ) : (
           <Text style={styles.ownerNote}>Billing is managed by the household owner.</Text>
@@ -220,36 +235,45 @@ export default function HouseholdScreen() {
       </Panel>
 
       <Panel>
-        <SectionHeader eyebrow="INVITES" title="Invite someone" />
+        <SectionHeader eyebrow="MEMBERS" title="Add a member" />
         {billing?.is_owner ? (
-          <>
-            <Text style={[type.body, { marginBottom: spacing.md }]}>Only you can create and share household codes. Codes expire after seven days and can be used once.</Text>
-            <PrimaryButton label="Create and share invite" icon="plus" loading={creatingInvite} onPress={createInvite} testID="create-invite-btn" />
+          activeSubscription ? (
+            <>
+              <Text style={[type.body, { marginBottom: spacing.md }]}>
+                Your plan includes one shared member. Members beyond that add $2.49/month when they become active. Invite codes expire after seven days and can be used once.
+              </Text>
+              <PrimaryButton label="Create and share invite" icon="user-plus" loading={creatingInvite} onPress={createInvite} testID="create-invite-btn" />
 
-            {!!inviteCode && (
-              <View style={styles.codeCard}>
-                <Text style={styles.codeLabel}>NEW INVITE CODE</Text>
-                <Text style={styles.codeValue} selectable>{inviteCode}</Text>
-                <View style={styles.codeActions}>
-                  <SecondaryButton label="Copy" icon="copy" variant="soft" onPress={() => copyInvite(inviteCode)} fullWidth={false} />
-                  <SecondaryButton label="Share" icon="share-2" variant="soft" onPress={() => shareInvite(inviteCode)} fullWidth={false} style={{ marginLeft: spacing.sm }} />
-                </View>
-              </View>
-            )}
-
-            {invites.length > 0 && (
-              <View style={{ marginTop: spacing.md }}>
-                <Text style={styles.subsection}>ACTIVE INVITES</Text>
-                {invites.map((invite) => (
-                  <View key={invite.id} style={styles.inviteRow}>
-                    <View style={{ flex: 1 }}><Text style={styles.inviteCode} selectable>{invite.code}</Text><Text style={styles.metaSmall}>Expires {new Date(invite.expires_at).toLocaleDateString()}</Text></View>
-                    <Pressable hitSlop={10} onPress={() => copyInvite(invite.code)} style={styles.iconAction} accessibilityLabel="Copy invite code"><Feather name="copy" size={16} color={colors.primary} /></Pressable>
-                    <Pressable hitSlop={10} onPress={() => shareInvite(invite.code)} style={styles.iconAction} accessibilityLabel="Share invite code"><Feather name="share-2" size={16} color={colors.primary} /></Pressable>
+              {!!inviteCode && (
+                <View style={styles.codeCard}>
+                  <Text style={styles.codeLabel}>NEW INVITE CODE</Text>
+                  <Text style={styles.codeValue} selectable>{inviteCode}</Text>
+                  <View style={styles.codeActions}>
+                    <SecondaryButton label="Copy" icon="copy" variant="soft" onPress={() => copyInvite(inviteCode)} fullWidth={false} />
+                    <SecondaryButton label="Share" icon="share-2" variant="soft" onPress={() => shareInvite(inviteCode)} fullWidth={false} style={{ marginLeft: spacing.sm }} />
                   </View>
-                ))}
-              </View>
-            )}
-          </>
+                </View>
+              )}
+
+              {invites.length > 0 && (
+                <View style={{ marginTop: spacing.md }}>
+                  <Text style={styles.subsection}>ACTIVE INVITES</Text>
+                  {invites.map((invite) => (
+                    <View key={invite.id} style={styles.inviteRow}>
+                      <View style={{ flex: 1 }}><Text style={styles.inviteCode} selectable>{invite.code}</Text><Text style={styles.metaSmall}>Expires {new Date(invite.expires_at).toLocaleDateString()}</Text></View>
+                      <Pressable hitSlop={10} onPress={() => copyInvite(invite.code)} style={styles.iconAction} accessibilityLabel="Copy invite code"><Feather name="copy" size={16} color={colors.primary} /></Pressable>
+                      <Pressable hitSlop={10} onPress={() => shareInvite(invite.code)} style={styles.iconAction} accessibilityLabel="Share invite code"><Feather name="share-2" size={16} color={colors.primary} /></Pressable>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
+          ) : (
+            <>
+              <Text style={[type.body, { marginBottom: spacing.md }]}>Upgrade to GroSharey Shared to invite your first member. The $5 plan includes one share plus AI receipt parsing.</Text>
+              <PrimaryButton label="Subscribe to invite someone" icon="user-plus" onPress={startSubscription} loading={billingBusy} />
+            </>
+          )
         ) : (
           <Text style={styles.ownerNote}>Only the household owner can create, copy or share invite codes.</Text>
         )}
@@ -264,7 +288,7 @@ export default function HouseholdScreen() {
       <View style={styles.section}>
         <SectionHeader eyebrow="SHARED" title="Shared lists" />
         {lists.length === 0 ? (
-          <EmptyState icon="shopping-cart" title="No shared lists yet" body="Create a list above and everyone in the household can start adding items." />
+          <EmptyState icon="shopping-cart" title="No shared lists yet" body="Create a list above and start adding items. When you subscribe, invited members will see the same lists." />
         ) : (
           <FlatList
             data={lists}
