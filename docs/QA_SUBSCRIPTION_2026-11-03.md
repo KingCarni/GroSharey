@@ -205,7 +205,13 @@ redemption of the same code correctly fails — test T10). But
 
 ## 3. Open items — decisions, not defects
 
-### O1 — Lapsed multi-member households keep full data access
+> **Both decided on 2026-11-03.** O1 is **approved as intended beta behaviour**: existing
+> household members keep access to shared lists, chat and receipt history after expiry, while
+> new invitations and paid receipt parsing stay disabled without a valid entitlement — which is
+> exactly what this branch enforces, so no code change follows. O2 is **accepted for beta and
+> carried as a follow-up**: a short payment-recovery policy is needed before general release.
+
+### O1 — Lapsed multi-member households keep full data access — APPROVED
 
 `household_has_access()` is referenced by **no RLS policy** — only by
 `household_billing_summary` for display, where nothing reads it. So when a shared household's
@@ -215,10 +221,9 @@ subscription lapses today:
 - new invites are refused ✅
 - **existing extra members keep full read/write access to lists, receipts and chat** ❓
 
-That may be exactly right for a beta (locking testers out of their own data is worse than a
-little free sharing), but it does not match "paid entitlements revoked when appropriate", so it
-should be a conscious decision. I did not change it: adding an RLS lockout is a behaviour change
-well beyond a QA pass and could strand testers mid-shop.
+This is the approved beta behaviour: locking testers out of their own data is worse than a
+little free sharing. No RLS lockout was added. Revisit before general release if the free tier
+starts being used as a way to keep a shared household going.
 
 Related: `household_has_access()` also changed meaning in `20260822033000`. It used to return
 `true` for any household with no subscription row; it now returns
@@ -226,11 +231,26 @@ Related: `household_has_access()` also changed meaning in `20260822033000`. It u
 but anyone who later wires it into a policy should know that a pre-existing multi-member
 household with no subscription row evaluates to **false**.
 
-### O2 — `past_due` grants the paid entitlement
+### O2 — `past_due` grants the paid entitlement — FOLLOW-UP REQUIRED
 
 Both `household_has_paid_plan()` and the client treat `past_due` as paid, i.e. a full Stripe
-dunning cycle (up to ~3 weeks) of free service after a card fails. Deliberate and reasonable;
-flagging it so it is not a surprise. `unpaid` correctly does not grant entitlement (test T26).
+dunning cycle (up to ~3 weeks) of free service after a card fails. `unpaid` correctly does not
+grant entitlement (test T26).
+
+**Accepted for beta, tracked as a follow-up:** a short payment-recovery policy is needed before
+general release. Decisions it has to make:
+
+- How long a `past_due` household keeps the paid entitlement (Stripe's retry schedule is
+  configurable; the code currently inherits whatever it is).
+- Whether sharing and parsing degrade at different points — e.g. keep existing members but stop
+  new invites and new AI parses after N days `past_due`.
+- What the owner is told, and where. There is no in-app dunning notice today: a `past_due`
+  household still reads "$5.00/month · Shared" on the billing screen with no hint that a payment
+  failed. The data is already there (`household_billing_summary.status`), so this is a UI add.
+- What happens at the end of the window — `unpaid` (already unentitled) versus cancel.
+
+Implementing it is a change to `household_has_paid_plan()` plus a Stripe dunning-settings
+decision plus the billing-screen notice. Deliberately **not** in this PR.
 
 ---
 
@@ -371,8 +391,8 @@ idempotent and order-independent.
    (`stripe events resend`) — the ledger and the re-read are new and have never seen Stripe.
 3. **Confirm a failed payment** (`4000 0000 0000 0341`) lands the household in `past_due` and
    that the dunning grace in O2 is what you want.
-4. **Decide O1** — whether a lapsed shared household should lose data access. Leaving it as-is
-   is a defensible beta answer, but make it a decision.
+4. ~~**Decide O1**~~ — **done 2026-11-03**: existing members keep access after expiry; new
+   invites and paid parsing stay disabled. Already what this branch enforces.
 5. **Walk the UI once on a device**: free-plan copy, Upgrade → Checkout, deep-link return
    refreshing to "Shared", abandoning Checkout (household should sit at `checkout_pending` and
    the Upgrade button must still work), non-owner seeing "Billing is managed by the household

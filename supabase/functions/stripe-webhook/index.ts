@@ -201,7 +201,10 @@ Deno.serve(async (request) => {
       || event.type === 'invoice.paid'
     ) {
       const invoice = event.data.object;
-      const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+      // `invoice.subscription` was removed in the 2025 API versions in favour of
+      // `invoice.parent.subscription_details.subscription`, so read either shape.
+      const nested = invoice.subscription ?? invoice.parent?.subscription_details?.subscription;
+      const subscriptionId = typeof nested === 'string' ? nested : nested?.id;
       if (subscriptionId) result = await syncSubscription(supabase, subscriptionId);
     }
 
