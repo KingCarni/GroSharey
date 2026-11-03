@@ -39,6 +39,7 @@ const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const googleVisionApiKey = Deno.env.get('GOOGLE_VISION_API_KEY');
 const openAiApiKey = Deno.env.get('OPENAI_API_KEY');
 const openAiModel = Deno.env.get('OPENAI_RECEIPT_MODEL') ?? 'gpt-5-mini';
+const processSecret = Deno.env.get('PROCESS_RECEIPTS_SECRET') ?? '';
 const parserVersion = 'vision-openai-v3';
 
 function json(data: unknown, status = 200) {
@@ -348,7 +349,31 @@ ${numberedText.slice(0, 36000)}`;
   return reconcileConfidence(tightenLineTotalsFromOcr(sanitized, rawText));
 }
 
+/**
+ * Independent entitlement check. OCR + AI parsing is a paid feature, so this function never
+ * relies on the queue state alone: a household can lapse (or a row can be queued by some
+ * future code path) between enqueue and processing, and a lapsed household must not incur
+ * Google Vision / OpenAI cost. Fails closed if the check itself cannot be made.
+ */
+async function householdHasPaidPlan(supabase: ReturnType<typeof createClient>, householdId: string) {
+  const { data, error } = await supabase.rpc('household_has_paid_plan', { target_household_id: householdId });
+  if (error) return { entitled: false, reason: `entitlement check failed: ${error.message}` };
+  return { entitled: data === true, reason: data === true ? null : 'household has no paid plan' };
+}
+
 async function processReceipt(supabase: ReturnType<typeof createClient>, receipt: ReceiptRow) {
+  const entitlement = await householdHasPaidPlan(supabase, receipt.household_id);
+  if (!entitlement.entitled) {
+    // Drop it out of the queue without spending a single paid API call.
+    await supabase.from('receipts').update({
+      parse_status: 'manual',
+      parse_error: null,
+      parse_confidence: null,
+      parsed_at: null,
+    }).eq('id', receipt.id);
+    return { id: receipt.id, status: 'skipped', reason: entitlement.reason };
+  }
+
   await supabase.from('receipts').update({ parse_status: 'processing', parse_error: null }).eq('id', receipt.id);
 
   try {
@@ -435,6 +460,13 @@ async function processReceipt(supabase: ReturnType<typeof createClient>, receipt
 Deno.serve(async (request) => {
   if (request.method !== 'POST') return json({ error: 'POST required' }, 405);
   if (!supabaseUrl || !serviceRoleKey) return json({ error: 'Missing Supabase environment.' }, 500);
+  // This function is deployed with --no-verify-jwt so pg_cron can reach it. When
+  // PROCESS_RECEIPTS_SECRET is configured, only callers presenting it may drive the queue,
+  // which stops anyone from forcing paid OCR/AI work by hammering the public URL. Unset, the
+  // endpoint behaves exactly as before (it still only touches already-queued receipts).
+  if (processSecret && request.headers.get('x-grosharey-cron-secret') !== processSecret) {
+    return json({ error: 'Forbidden.' }, 403);
+  }
   if (!googleVisionApiKey || !openAiApiKey) return json({ error: 'OCR/parser secrets are not configured.' }, 500);
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {

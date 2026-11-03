@@ -9,24 +9,22 @@ function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-async function stripePost(path: string, values: Record<string, string | number>) {
-  const body = new URLSearchParams();
-  for (const [key, value] of Object.entries(values)) body.set(key, String(value));
-  const response = await fetch(`https://api.stripe.com/v1${path}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${stripeSecretKey}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload?.error?.message ?? `Stripe request failed (${response.status})`);
-  return payload;
-}
+async function stripeRequest(
+  method: 'GET' | 'POST' | 'DELETE',
+  path: string,
+  values?: Record<string, string | number>,
+  idempotencyKey?: string,
+) {
+  const headers: Record<string, string> = { Authorization: `Bearer ${stripeSecretKey}` };
+  let body: URLSearchParams | undefined;
+  if (values) {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    body = new URLSearchParams();
+    for (const [key, value] of Object.entries(values)) body.set(key, String(value));
+  }
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
 
-async function stripeDelete(path: string) {
-  const response = await fetch(`https://api.stripe.com/v1${path}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${stripeSecretKey}` },
-  });
+  const response = await fetch(`https://api.stripe.com/v1${path}`, { method, headers, body });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload?.error?.message ?? `Stripe request failed (${response.status})`);
   return payload;
@@ -49,6 +47,9 @@ Deno.serve(async (request) => {
   const householdId = typeof body?.household_id === 'string' ? body.household_id : null;
   if (!householdId) return json({ error: 'household_id is required.' }, 400);
 
+  // Any active member may *request* a reconciliation (a joining member does this right after
+  // redeeming an invite). The quantity is always derived server-side from active memberships,
+  // never from the caller, and no other billing change is possible through this route.
   const { data: membership } = await supabase
     .from('household_memberships')
     .select('id')
@@ -74,20 +75,43 @@ Deno.serve(async (request) => {
     .eq('status', 'active');
   const activeMembers = count ?? 1;
   const extraSeats = Math.max(activeMembers - 2, 0);
-  let extraItemId = subscription.stripe_extra_item_id as string | null;
+
+  // Read the live subscription instead of trusting the cached item id. Two members opening
+  // the billing screen at the same moment used to be able to create two extra-seat items
+  // (double billing) because both saw stripe_extra_item_id as null.
+  const liveSubscription = await stripeRequest('GET', `/subscriptions/${subscription.stripe_subscription_id}?expand[]=items.data.price`);
+  const liveItems: { id: string; quantity?: number; price?: { id?: string } }[] = liveSubscription.items?.data ?? [];
+  const extraItems = liveItems.filter((item) => item.price?.id === extraSeatPriceId);
+  let extraItemId: string | null = extraItems[0]?.id ?? null;
+
+  // Collapse any duplicates a previous race may already have created.
+  for (const duplicate of extraItems.slice(1)) {
+    await stripeRequest('DELETE', `/subscription_items/${duplicate.id}?proration_behavior=create_prorations`);
+  }
 
   if (extraSeats > 0 && extraItemId) {
-    await stripePost(`/subscription_items/${extraItemId}`, { quantity: extraSeats, proration_behavior: 'create_prorations' });
+    if (Number(extraItems[0]?.quantity ?? 0) !== extraSeats) {
+      await stripeRequest('POST', `/subscription_items/${extraItemId}`, {
+        quantity: extraSeats,
+        proration_behavior: 'create_prorations',
+      });
+    }
   } else if (extraSeats > 0 && !extraItemId) {
-    const item = await stripePost('/subscription_items', {
-      subscription: subscription.stripe_subscription_id,
-      price: extraSeatPriceId,
-      quantity: extraSeats,
-      proration_behavior: 'create_prorations',
-    });
+    const item = await stripeRequest(
+      'POST',
+      '/subscription_items',
+      {
+        subscription: subscription.stripe_subscription_id,
+        price: extraSeatPriceId,
+        quantity: extraSeats,
+        proration_behavior: 'create_prorations',
+      },
+      // Concurrent callers collapse onto one Stripe item instead of creating several.
+      `grosharey-seat-item-${subscription.stripe_subscription_id}-${extraSeats}`,
+    );
     extraItemId = item.id;
   } else if (extraSeats === 0 && extraItemId) {
-    await stripeDelete(`/subscription_items/${extraItemId}?proration_behavior=create_prorations`);
+    await stripeRequest('DELETE', `/subscription_items/${extraItemId}?proration_behavior=create_prorations`);
     extraItemId = null;
   }
 

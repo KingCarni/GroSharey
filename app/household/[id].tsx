@@ -1,6 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { Link, useLocalSearchParams, useRouter } from 'expo-router';
+import { Link, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { ComponentProps, useCallback, useEffect, useState } from 'react';
 import {
   Alert,
@@ -23,6 +23,7 @@ import {
   SectionHeader,
   TextField,
 } from '../../src/components/ui';
+import { formatMonthly, hasPaidPlan, type BillingSummary } from '../../src/lib/billing';
 import { supabase } from '../../src/lib/supabase';
 import { colors, radii, spacing, type } from '../../src/theme';
 import type { GroceryList } from '../../src/types/database';
@@ -30,19 +31,6 @@ import type { GroceryList } from '../../src/types/database';
 type Invite = { id: string; code: string; expires_at: string; accepted_at: string | null; revoked_at: string | null };
 type Member = { id: string; role: 'owner' | 'member'; profiles: { display_name: string | null } | null };
 type FeatherName = ComponentProps<typeof Feather>['name'];
-type BillingSummary = {
-  is_owner: boolean;
-  has_access: boolean;
-  status: string;
-  active_members: number;
-  included_members: number;
-  extra_seats: number;
-  monthly_cents: number;
-  current_period_end: string | null;
-  cancel_at_period_end: boolean;
-};
-
-const paidStatuses = new Set(['active', 'trialing', 'past_due', 'comped']);
 
 export default function HouseholdScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -104,13 +92,25 @@ export default function HouseholdScreen() {
     };
   }, [id, loadHousehold]);
 
-  const billingStatus = billing?.status;
+  // Returning from Stripe Checkout or the Customer Portal re-focuses this screen. The webhook
+  // also pushes a realtime change on household_subscriptions, but a deep-link return can beat
+  // the webhook, so refresh on focus too.
+  useFocusEffect(
+    useCallback(() => {
+      void loadHousehold();
+    }, [loadHousehold]),
+  );
+
+  const isOwner = billing?.is_owner ?? false;
+  const activeSubscription = hasPaidPlan(billing);
   const billingMembers = billing?.active_members;
 
   useEffect(() => {
-    if (!id || !billingStatus || !paidStatuses.has(billingStatus)) return;
+    // Owner only: this call mutates Stripe quantities (with prorations). A joining member
+    // triggers its own one-off reconciliation right after redeeming an invite.
+    if (!id || !isOwner || !activeSubscription) return;
     void supabase.functions.invoke('sync-stripe-seats', { body: { household_id: id } });
-  }, [billingMembers, billingStatus, id]);
+  }, [activeSubscription, billingMembers, id, isOwner]);
 
   async function createList() {
     if (!listName.trim()) return;
@@ -123,7 +123,7 @@ export default function HouseholdScreen() {
 
   async function createInvite() {
     if (!billing?.is_owner) return Alert.alert('Owner only', 'Only the household owner can create or share invite codes.');
-    if (!paidStatuses.has(billing.status)) {
+    if (!hasPaidPlan(billing)) {
       return Alert.alert('Upgrade to share', 'GroSharey is free for one person. Subscribe for $5/month to invite your first member and unlock AI receipt parsing.');
     }
     setCreatingInvite(true);
@@ -137,12 +137,12 @@ export default function HouseholdScreen() {
   }
 
   async function shareInvite(code: string) {
-    if (!billing?.is_owner || !paidStatuses.has(billing.status)) return;
+    if (!billing?.is_owner || !hasPaidPlan(billing)) return;
     await Share.share({ message: `Join my GroSharey household with invite code: ${code}` });
   }
 
   async function copyInvite(code: string) {
-    if (!billing?.is_owner || !paidStatuses.has(billing.status)) return;
+    if (!billing?.is_owner || !hasPaidPlan(billing)) return;
     await Clipboard.setStringAsync(code);
     Alert.alert('Invite copied', `${code} is on your clipboard.`);
   }
@@ -173,8 +173,7 @@ export default function HouseholdScreen() {
     );
   }
 
-  const activeSubscription = !!billing && paidStatuses.has(billing.status);
-  const monthly = activeSubscription ? ((billing?.monthly_cents ?? 500) / 100).toFixed(2) : '0.00';
+  const monthly = activeSubscription ? formatMonthly(billing?.monthly_cents) : '0.00';
   const extraSeatLabel = billing?.extra_seats === 1 ? 'extra seat' : 'extra seats';
 
   return (

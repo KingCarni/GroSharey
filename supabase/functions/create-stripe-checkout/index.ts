@@ -6,6 +6,11 @@ const stripeSecretKey = Deno.env.get('STRIPE_SECRET_KEY')!;
 const basePriceId = Deno.env.get('STRIPE_BASE_PRICE_ID')!;
 const extraSeatPriceId = Deno.env.get('STRIPE_EXTRA_SEAT_PRICE_ID')!;
 
+// Stripe subscription statuses that mean "this household already has a subscription we must
+// not duplicate". `incomplete` is included: the customer is mid-payment on an existing
+// subscription, and a second Checkout would bill them twice.
+const liveStripeStatuses = new Set(['trialing', 'active', 'past_due', 'unpaid', 'incomplete']);
+
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -16,13 +21,20 @@ function formBody(values: Record<string, string | number | boolean>) {
   return body;
 }
 
-async function stripePost(path: string, values: Record<string, string | number | boolean>) {
+async function stripePost(
+  path: string,
+  values: Record<string, string | number | boolean>,
+  idempotencyKey?: string,
+) {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${stripeSecretKey}`,
+    'Content-Type': 'application/x-www-form-urlencoded',
+  };
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+
   const response = await fetch(`https://api.stripe.com/v1${path}`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${stripeSecretKey}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
+    headers,
     body: formBody(values),
   });
   const payload = await response.json();
@@ -30,10 +42,30 @@ async function stripePost(path: string, values: Record<string, string | number |
   return payload;
 }
 
+async function stripeGet(path: string) {
+  const response = await fetch(`https://api.stripe.com/v1${path}`, {
+    headers: { Authorization: `Bearer ${stripeSecretKey}` },
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    // A deleted/unknown subscription id is not an error for our purposes.
+    if (response.status === 404) return null;
+    throw new Error(payload?.error?.message ?? `Stripe request failed (${response.status})`);
+  }
+  return payload;
+}
+
 Deno.serve(async (request) => {
   if (request.method !== 'POST') return json({ error: 'POST required' }, 405);
   if (!supabaseUrl || !serviceRoleKey || !stripeSecretKey || !basePriceId || !extraSeatPriceId) {
     return json({ error: 'Stripe billing secrets are not configured.' }, 500);
+  }
+  // Checkout line items need recurring Price ids. A Product id here fails deep inside Stripe
+  // with a confusing message, so catch the misconfiguration up front.
+  for (const [name, value] of [['STRIPE_BASE_PRICE_ID', basePriceId], ['STRIPE_EXTRA_SEAT_PRICE_ID', extraSeatPriceId]]) {
+    if (!value.startsWith('price_')) {
+      return json({ error: `${name} must be a Stripe Price id (price_...), not "${value.slice(0, 5)}...".` }, 500);
+    }
   }
 
   const authHeader = request.headers.get('Authorization') ?? '';
@@ -72,18 +104,48 @@ Deno.serve(async (request) => {
     .eq('household_id', householdId)
     .maybeSingle();
 
+  // Duplicate-charge guard. The stored status can lag behind Stripe (delayed or dropped
+  // webhook, or a status such as `canceled` while the household is still inside a
+  // cancel-at-period-end grace window), so Stripe itself is the source of truth.
+  if (existing?.stripe_subscription_id) {
+    const liveSubscription = await stripeGet(`/subscriptions/${existing.stripe_subscription_id}`);
+    if (liveSubscription && liveStripeStatuses.has(liveSubscription.status)) {
+      return json(
+        {
+          error: 'This household already has a Stripe subscription. Use Manage subscription to change it.',
+          stripe_status: liveSubscription.status,
+        },
+        409,
+      );
+    }
+  }
   if (existing?.status === 'active' || existing?.status === 'trialing') {
     return json({ error: 'This household already has an active subscription.' }, 409);
   }
 
   let customerId = existing?.stripe_customer_id ?? null;
   if (!customerId) {
-    const customer = await stripePost('/customers', {
-      email: user.email ?? '',
-      'metadata[household_id]': householdId,
-      'metadata[owner_user_id]': user.id,
-    });
+    const customer = await stripePost(
+      '/customers',
+      {
+        email: user.email ?? '',
+        'metadata[household_id]': householdId,
+        'metadata[owner_user_id]': user.id,
+      },
+      // Deterministic key: a retry of this call reuses the same Stripe customer instead of
+      // creating a second one for the same household.
+      `grosharey-customer-${householdId}`,
+    );
     customerId = customer.id;
+
+    // Persist the customer before Checkout so a failure here cannot orphan it.
+    await supabase.from('household_subscriptions').upsert({
+      household_id: householdId,
+      owner_user_id: user.id,
+      status: existing?.status ?? 'inactive',
+      stripe_customer_id: customerId,
+      updated_at: new Date().toISOString(),
+    });
   }
 
   const successUrl = `${supabaseUrl}/functions/v1/stripe-return?status=success&household_id=${encodeURIComponent(householdId)}`;
