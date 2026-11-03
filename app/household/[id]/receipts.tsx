@@ -27,6 +27,7 @@ import {
   TextField,
 } from '../../../src/components/ui';
 import { useAuth } from '../../../src/lib/auth';
+import { hasPaidPlan, type BillingSummary } from '../../../src/lib/billing';
 import { supabase } from '../../../src/lib/supabase';
 import { colors, radii, spacing, type } from '../../../src/theme';
 
@@ -84,11 +85,7 @@ type PendingImage = {
   fileName?: string | null;
 };
 
-type BillingSummary = {
-  status: string;
-};
 
-const paidStatuses = new Set(['active', 'trialing', 'past_due', 'comped']);
 
 export default function ReceiptsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -139,7 +136,7 @@ export default function ReceiptsScreen() {
     const { data, error } = await supabase.rpc('household_billing_summary', { target_household_id: id });
     if (error) return;
     const row = (Array.isArray(data) ? data[0] : data) as BillingSummary | null;
-    setCanParse(!!row && paidStatuses.has(row.status));
+    setCanParse(hasPaidPlan(row));
   }
 
   async function loadReceipts() {

@@ -19,3 +19,4 @@ yarn-error.log*
 credentials.json
 *.pem
 .credentials
+supabase/.temp/
